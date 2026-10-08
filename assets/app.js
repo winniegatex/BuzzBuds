@@ -78,6 +78,7 @@ const S = {
   uiGameMenu: false,
   watchChatOpen: true,
   gameChatOpen: false,
+  gameChatUnread: 0,
   sidebarCollapsed: localStorage.getItem("buzz-nav-collapsed") === "1",
   visitPop: false,
   hubActivity: null,
@@ -308,30 +309,115 @@ function clientGameInProgress(game) {
   return false;
 }
 
-function gameActionsFooter(game) {
-  if (game.winner) {
-    return `<div class="row gap-top game-actions">
-      <button class="btn rose" type="button" data-act="reset-game">Play again</button>
-      <button class="btn soft" type="button" data-act="go" data-route="games" data-lobby="1">Back to games</button>
-      <button class="btn ghost" type="button" data-act="go" data-route="home">Home</button>
-    </div>`;
+function gameHeadline(game) {
+  const them = (partnerName().split(" ")[0] || partnerName());
+  if (game.type === "solitaire") {
+    if (game.you?.won) return "You cleared the deck!";
+    return `${game.you?.moves || 0} moves`;
   }
-  return `<div class="row gap-top game-actions">
+  if (game.type === "kahoot") {
+    if (game.phase === "done") return "Quiz complete";
+    if (game.phase === "build") return game.youAreHost ? "Build your quiz" : `Waiting for ${them}…`;
+    if (game.yourTurn) return "Your turn";
+    return `Waiting for ${them}…`;
+  }
+  if (game.winner === "draw") return "It's a draw!";
+  if (game.winner) {
+    if (game.type === "memory") {
+      return String(game.winner) === String(S.user.id) ? "You won!" : `${them} won!`;
+    }
+    if (game.type === "hangman") {
+      if (game.winner === "guesser") return game.youAre === "guesser" ? "You guessed it!" : `${them} won!`;
+      return game.youAre === "setter" ? `${them} ran out of guesses!` : "Out of guesses.";
+    }
+    return game.winner === game.youAre ? "You won!" : `${them} won!`;
+  }
+  if (game.yourTurn) return "Your turn";
+  return `Waiting for ${them}…`;
+}
+
+function gameScoreLine(game) {
+  if (game.type === "memory" && game.scores) {
+    const me = game.scores[String(S.user.id)] ?? 0;
+    const themId = Object.keys(game.scores).find((id) => id !== String(S.user.id));
+    const them = themId != null ? (game.scores[themId] ?? 0) : 0;
+    return `You ${me} · ${esc(partnerName().split(" ")[0] || "them")} ${them}`;
+  }
+  if (game.type === "kahoot" && Array.isArray(game.scores)) {
+    return game.scores.map((row) => `${row.userId === S.user.id ? "You" : (partnerName().split(" ")[0] || "them")} ${row.points}`).join(" · ");
+  }
+  if (game.type === "hangman" && game.phase === "guess") return `Wrong ${game.wrong || 0}/6`;
+  if (game.type === "solitaire") {
+    const p = game.partner;
+    return p ? `${esc(partnerName().split(" ")[0] || "them")}: ${p.foundationCards} foundations` : "";
+  }
+  return "";
+}
+
+function gameTurnBannerHtml(game) {
+  const done = !!(game.winner || (game.type === "solitaire" && game.you?.won) || (game.type === "kahoot" && game.phase === "done"));
+  const mineOn = !done && !!game.yourTurn;
+  const theirsOn = !done && !game.yourTurn;
+  const score = gameScoreLine(game);
+  return `<div class="game-turn-banner" role="status">
+    <div class="game-turn-people">
+      <span class="game-turn-ava ${mineOn ? "on" : ""}" title="You">${ava(S.user.displayName)}</span>
+      <span class="game-turn-ava ${theirsOn ? "on" : ""}" title="${esc(partnerName())}">${ava(partnerName())}</span>
+    </div>
+    <p class="game-turn-text">${esc(gameHeadline(game))}</p>
+    ${score ? `<p class="game-turn-score">${score}</p>` : ""}
+  </div>`;
+}
+
+function gameResultCardHtml(game) {
+  if (!(game.winner || (game.type === "solitaire" && game.you?.won) || (game.type === "kahoot" && game.phase === "done"))) return "";
+  return `<div class="game-result-card glass">
+    <p>${esc(gameHeadline(game))}</p>
+  </div>`;
+}
+
+function tttWinCells(game) {
+  if (!game?.board || !game.winner || game.winner === "draw") return [];
+  const lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+  for (const line of lines) {
+    if (game.board[line[0]] === game.winner && game.board[line[1]] === game.winner && game.board[line[2]] === game.winner) return line;
+  }
+  return [];
+}
+
+function gameActionsFooter(game) {
+  const again = game.winner || (game.type === "solitaire") || (game.type === "kahoot")
+    ? `<button class="btn rose" type="button" data-act="reset-game">${game.type === "solitaire" ? "New deal" : game.type === "kahoot" ? "Reset quiz" : "Play again"}</button>`
+    : "";
+  return `<div class="row game-actions">
+    ${again}
+    <button class="btn soft" type="button" data-act="go" data-route="games" data-lobby="1">Back to games</button>
+    <button class="btn ghost" type="button" data-act="go" data-route="home">Home</button>
     <button class="btn ghost" type="button" data-act="game-menu">Leave game</button>
+    <button class="btn ghost" type="button" data-act="howto" data-kind="${esc(game.type || "")}">How to play</button>
   </div>`;
 }
 
 function wrapGameBody(html, game) {
-  return `${html}${gameActionsFooter(game)}`;
+  return `<div class="game-play">
+    ${gameTurnBannerHtml(game)}
+    <div class="game-stage" data-type="${esc(game.type)}">
+      <div class="game-stage-inner">${html}</div>
+    </div>
+    ${gameActionsFooter(game)}
+    ${gameResultCardHtml(game)}
+  </div>`;
 }
 
 function gameBarHtml(title) {
+  const unread = S.gameChatUnread || 0;
+  const badge = unread ? `<span class="chat-bubble-badge">${unread > 9 ? "9+" : unread}</span>` : "";
   return `<header class="activity-bar glass">
     <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to games">←</button>
     <div class="activity-bar-title"><span class="eyebrow">Games</span><strong>${esc(title)}</strong></div>
     <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
     <button class="bar-btn" type="button" data-act="howto" data-kind="${esc(S.gameType || "")}" aria-label="How to play">?</button>
-    <button class="bar-btn game-chat-toggle" type="button" data-act="game-chat-toggle" aria-label="Game chat">💬</button>
+    <button class="bar-btn game-chat-toggle" type="button" data-act="game-chat-toggle" aria-label="Game chat">💬${badge}</button>
     <button class="bar-btn" type="button" data-act="game-menu" aria-label="Game menu">⋯</button>
   </header>`;
 }
@@ -637,9 +723,8 @@ function gameCommentsHtml() {
 function gameChatAside() {
   return `<aside class="game-chat card">
     <h3>Game chat</h3>
-    <p class="empty">Banter for this match only.</p>
-    <div id="game-msgs" class="watch-msgs">${gameCommentsHtml()}</div>
-    ${chatComposerHtml("game-chat", { max: 280, placeholder: "Cheer, tease, or gloat…", extraClass: "watch-composer" })}
+    <div id="game-msgs" class="watch-msgs game-msgs">${gameCommentsHtml()}</div>
+    ${chatComposerHtml("game-chat", { max: 280, placeholder: "Cheer, tease, or gloat…", extraClass: "watch-composer game-composer" })}
   </aside>`;
 }
 
@@ -2251,6 +2336,16 @@ function applyLiveEvent(ev) {
   if (ev.kind === "game_comment" && p.comment) {
     if (S.gameComments.some((c) => c.id === p.comment.id)) return;
     S.gameComments.push(p.comment);
+    if (!S.gameChatOpen && p.comment.senderId !== S.user?.id) {
+      S.gameChatUnread = (S.gameChatUnread || 0) + 1;
+      const toggle = document.querySelector(".game-chat-toggle");
+      if (toggle && !toggle.querySelector(".chat-bubble-badge")) {
+        toggle.insertAdjacentHTML("beforeend", `<span class="chat-bubble-badge">${S.gameChatUnread > 9 ? "9+" : S.gameChatUnread}</span>`);
+      } else if (toggle) {
+        const b = toggle.querySelector(".chat-bubble-badge");
+        if (b) b.textContent = S.gameChatUnread > 9 ? "9+" : String(S.gameChatUnread);
+      }
+    }
     paintGameComments();
   }
   if (ev.kind === "game" && p.type) {
@@ -2622,9 +2717,7 @@ function solitaireInner(game) {
     }).join("");
     return `<button class="sol-col" type="button" data-act="sol-col" data-pile="${pi}">${cards || "<span class='sol-empty'></span>"}</button>`;
   }).join("");
-  return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
-    <p class="empty">Your own Klondike board. ${you.moves} moves.</p>
-    <div class="sol-board">
+  return wrapGameBody(`<div class="sol-board">
       <div class="sol-top">
         <button class="sol-pile stock" type="button" data-act="sol-draw" title="Draw"><span class="sol-stock">${you.stock ? you.stock : "↻"}</span></button>
         <div class="sol-pile waste">${wasteTop ? solCardHtml(wasteTop) : "<span class='sol-slot'>—</span>"}</div>
@@ -2634,8 +2727,7 @@ function solitaireInner(game) {
       <div class="row gap-top">
         <button class="btn ghost" type="button" data-act="sol-waste-foundation" ${wasteTop ? "" : "disabled"}>Waste → foundation</button>
       </div>
-    </div>
-    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">New deal</button></div>`, game);
+    </div>`, game);
 }
 
 function kahootScoresHtml(game) {
@@ -2665,15 +2757,14 @@ function kahootInner(game) {
         <div class="row gap-top">${packs}<button class="btn ghost" type="button" data-act="kahoot-clear">Clear</button></div>
         <button class="btn rose gap-top" type="button" data-act="kahoot-start" ${game.questionCount ? "" : "disabled"}>Start quiz (${game.questionCount})</button>`
       : `<p class="empty">The host is building the quiz. Hang tight.</p>`;
-    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
+    return wrapGameBody(`<div class="kahoot-stage">
       ${scores}
       <ol class="kahoot-list">${list || "<li class='empty'>No questions yet.</li>"}</ol>
       ${host}
-      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Reset quiz</button></div>`, game);
+    </div>`, game);
   }
   if (game.phase === "done") {
-    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
-      ${scores}`, game);
+    return wrapGameBody(`<div class="kahoot-stage">${scores}</div>`, game);
   }
   const q = game.currentQuestion;
   const colors = ["kahoot-a", "kahoot-b", "kahoot-c", "kahoot-d"];
@@ -2690,12 +2781,13 @@ function kahootInner(game) {
     reveal = `<p class="flash">${pts ? `+${pts} points` : "No points this time."}</p>`;
     if (game.youAreHost) reveal += `<button class="btn rose" type="button" data-act="kahoot-next">Next</button>`;
   }
-  return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
+  return wrapGameBody(`<div class="kahoot-stage">
     ${scores}
     <p class="kahoot-q">${q ? esc(q.prompt) : ""}</p>
     <p class="empty">Question ${game.current + 1} of ${game.questionCount}</p>
     <div class="kahoot-grid">${choices}</div>
-    ${reveal}`, game);
+    ${reveal}
+  </div>`, game);
 }
 
 function pieceHtml(piece) {
@@ -2717,18 +2809,24 @@ function gameInner() {
       const cls = cell === "red" ? "piece red" : cell === "black" ? "piece black" : "";
       return `<div class="c4-slot">${cls ? `<span class="${cls}"></span>` : ""}</div>`;
     }).join("")).join("");
-    return wrapGameBody(`<p>${esc(gameStatus(game))} You are ${game.youAre}.</p>
-      <div class="c4-cols">${cols}</div><div class="c4-board">${cells}</div>`, game);
+    return wrapGameBody(`<div class="c4-wrap">
+      <div class="c4-cols">${cols}</div>
+      <div class="c4-board">${cells}</div>
+    </div>`, game);
   }
   if (game.type === "memory") {
+    const n = game.cards.length;
+    const cols = n <= 12 ? 3 : n <= 16 ? 4 : 5;
     const cards = game.cards.map((card, index) => {
       const show = card.matched || card.up;
-      const label = show ? card.v : "";
       const open = game.yourTurn && !game.winner && !card.matched && !card.up;
-      return `<button class="memory-card" type="button" data-act="memory-flip" data-i="${index}" ${open ? "" : "disabled"}>${label}</button>`;
+      const win = game.winner && card.matched ? " win" : "";
+      return `<button class="memory-card ${show ? "up" : ""} ${card.matched ? "matched" : ""}${win}" type="button" data-act="memory-flip" data-i="${index}" ${open ? "" : "disabled"}>
+        <span class="memory-face back" aria-hidden="true"></span>
+        <span class="memory-face front">${show ? card.v : ""}</span>
+      </button>`;
     }).join("");
-    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
-      <div class="memory-grid">${cards}</div>`, game);
+    return wrapGameBody(`<div class="memory-grid" style="--mem-cols:${cols}">${cards}</div>`, game);
   }
   if (game.type === "hangman") {
     let play = "";
@@ -2743,13 +2841,14 @@ function gameInner() {
     } else {
       play = `<p class="hang-mask">${esc(game.mask || "····")}</p><p class="empty">Waiting for ${esc(partnerName())}…</p>`;
     }
-    return wrapGameBody(`<p>${esc(gameStatus(game))} You are the ${game.youAre}.</p>${play}
-      ${game.word ? `<p>Word was: <strong>${esc(game.word)}</strong></p>` : ""}`, game);
+    return wrapGameBody(`<div class="hang-stage">${play}
+      ${game.word ? `<p>Word was: <strong>${esc(game.word)}</strong></p>` : ""}</div>`, game);
   }
   if (game.type === "tictactoe") {
+    const winLine = tttWinCells(game);
     board = `<div class="ttt">${game.board.map((value, index) => {
       const open = game.yourTurn && game.legal.includes(index);
-      const cls = value === "X" ? "x" : "";
+      const cls = `${value === "X" ? "x" : ""}${winLine.includes(index) ? " win" : ""}`;
       return `<button class="cell ${cls}" type="button" data-act="ttt" data-i="${index}" ${open ? "" : "disabled"}>${esc(value || "")}</button>`;
     }).join("")}</div>`;
   } else if (game.type === "checkers") {
@@ -2772,13 +2871,9 @@ function gameInner() {
         cells.push(`<button class="sq play ${selected ? "sel" : ""} ${last ? "last" : ""}" type="button" data-act="pick" data-r="${row}" data-c="${col}">${pieceHtml(game.board[row][col])}${dest ? `<i class="dot"></i>` : ""}</button>`);
       });
     });
-    const side = game.youAre === "red" ? "You play coral." : "You play ink.";
-    board = `<p class="empty">${side} Jumps are required, and a second jump continues your turn.</p><div class="checkers">${cells.join("")}</div>`;
+    board = `<div class="checkers">${cells.join("")}</div>`;
   }
-  const title = game.type === "tictactoe" ? "Tic-tac-toe" : "Checkers";
-  const label = game.type === "tictactoe" ? `You are ${game.youAre}.` : "";
-  return wrapGameBody(`<p>${esc(gameStatus(game))} ${esc(label)}</p>
-    ${board}`, game);
+  return wrapGameBody(board, game);
 }
 
 function gamesScreen() {
@@ -3113,6 +3208,7 @@ function afterRender() {
     pullGameComments().catch(() => {});
     const gameList = document.getElementById("game-msgs");
     if (gameList) gameList.scrollTop = gameList.scrollHeight;
+    wireGameStage();
   }
   if (S.route === "call") attachCallMedia();
   if (S.route === "notes") markSectionSeen("notes");
@@ -3292,6 +3388,23 @@ function paintGame() {
   const root = document.getElementById("game-root");
   if (root) root.innerHTML = gameInner();
   paintGameComments();
+  wireGameStage();
+}
+
+function wireGameStage() {
+  const stage = document.querySelector(".game-stage");
+  if (!stage) return;
+  const apply = () => {
+    if (stage.clientWidth > 40) stage.style.setProperty("--stage-w", `${stage.clientWidth}px`);
+    if (stage.clientHeight > 40) stage.style.setProperty("--stage-h", `${stage.clientHeight}px`);
+  };
+  apply();
+  if (stage.dataset.wired) return;
+  stage.dataset.wired = "1";
+  if (typeof ResizeObserver !== "undefined") {
+    const ro = new ResizeObserver(apply);
+    ro.observe(stage);
+  }
 }
 
 async function pullGameComments() {
@@ -3959,6 +4072,7 @@ async function onClick(event) {
     }
     if (act === "game-chat-toggle") {
       S.gameChatOpen = !S.gameChatOpen;
+      if (S.gameChatOpen) S.gameChatUnread = 0;
       render();
       return;
     }

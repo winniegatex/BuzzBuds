@@ -7,19 +7,19 @@
   <meta name="description" content="BuzzBuds is a private bubble for two. Chat, watch together, play games, share moments and keep your love close, however far apart.">
   <meta property="og:title" content="BuzzBuds — a private bubble for two">
   <meta property="og:description" content="A private bubble for two, however far apart. Chat, watch together, play games, and share moments.">
-  <meta property="og:image" content="public/brand/og.png?v=31">
+  <meta property="og:image" content="public/brand/og.png?v=32">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="BuzzBuds">
   <title>BuzzBuds — a private bubble for two</title>
-  <link rel="icon" href="public/brand/icon-32.png?v=31" sizes="32x32" type="image/png">
-  <link rel="apple-touch-icon" href="public/brand/icon-180.png?v=31" sizes="180x180">
-  <link rel="manifest" href="assets/manifest.webmanifest?v=31">
+  <link rel="icon" href="public/brand/icon-32.png?v=32" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="public/brand/icon-180.png?v=32" sizes="180x180">
+  <link rel="manifest" href="assets/manifest.webmanifest?v=32">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=31">
+  <link rel="stylesheet" href="assets/app.css?v=32">
 </head>
 <body class="theme-dark">
   <div id="ambience" class="ambience" aria-hidden="true">
@@ -38,7 +38,7 @@
   <div id="app"><div id="view-root">
     <div class="booting boot-pulse" role="status" aria-live="polite">
       <div class="boot-logo">
-        <img class="boot-mark" src="public/brand/logo-full.png?v=31" alt="BuzzBuds">
+        <img class="boot-mark" src="public/brand/logo-full.png?v=32" alt="BuzzBuds">
       </div>
       <p>Opening your bubble…</p>
     </div>
@@ -48,10 +48,10 @@
     <div id="toast-actions"></div>
   </div>
   <noscript><p class="booting">BuzzBuds needs JavaScript turned on.</p></noscript>
-  <script src="assets/logo.js?v=31"></script>
-  <script src="assets/motion.js?v=31"></script>
-  <script src="assets/activities.js?v=31"></script>
-  <script src="assets/live.js?v=31"></script>
-  <script src="assets/app.js?v=31"></script>
+  <script src="assets/logo.js?v=32"></script>
+  <script src="assets/motion.js?v=32"></script>
+  <script src="assets/activities.js?v=32"></script>
+  <script src="assets/live.js?v=32"></script>
+  <script src="assets/app.js?v=32"></script>
 </body>
 </html>
