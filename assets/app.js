@@ -480,7 +480,7 @@ function dayLabel(iso) {
 
 function mark(kind = "icon") {
   if (kind === "full") {
-    return `<span class="brand-lockup full"><img class="logo-full" src="assets/logo.png" alt="BuzzBuds" width="220" height="220"></span>`;
+    return `<span class="brand-lockup full auth-logo-float"><img class="logo-full" src="assets/logo-mark.svg" alt="BuzzBuds" width="168" height="126"></span>`;
   }
   return `<span class="brand-lockup"><img class="mark" src="assets/icon.svg" alt="" width="36" height="36"><span class="wordmark">BuzzBuds</span></span>`;
 }
@@ -552,6 +552,7 @@ function syncMotionBody() {
   const brand = !S.user || S.route === "landing" || S.route === "auth";
   const inside = !!(S.user && S.bubble && S.bubble.status === "active");
   document.body.classList.toggle("brand-shell", brand);
+  document.body.classList.toggle("auth-glow", brand && S.route === "auth");
   document.body.classList.toggle("in-bubble", inside);
   document.body.classList.toggle("fx-off", !animationsEnabled());
   document.body.classList.add("app-ready");
@@ -1160,30 +1161,99 @@ function landingScreen() {
   </div>`;
 }
 
+function fieldIcon(name) {
+  const paths = {
+    person: '<circle cx="12" cy="8" r="3.2"/><path d="M5.5 19c1.2-3.4 3.4-5 6.5-5s5.3 1.6 6.5 5"/>',
+    mail: '<rect x="3.5" y="5.5" width="17" height="13" rx="3"/><path d="m5 8 7 5 7-5"/>',
+    lock: '<rect x="6" y="11" width="12" height="9" rx="2"/><path d="M8.5 11V8.5a3.5 3.5 0 0 1 7 0V11"/>',
+  };
+  return `<svg class="field-ico" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || ""}</svg>`;
+}
+
+function friendlyAuthError(message) {
+  const raw = String(message || "");
+  const map = [
+    [/valid email|email looks/i, "That email looks off."],
+    [/already registered/i, "That email already has a bubble — try signing in."],
+    [/does not match|password/i, "Email or password doesn’t match."],
+    [/at least 6/i, "Use at least 6 characters for your password."],
+  ];
+  for (const [re, copy] of map) {
+    if (re.test(raw)) return copy;
+  }
+  return raw || "Something went wrong.";
+}
+
+function authValid(form) {
+  if (!form) return false;
+  const email = String(form.email?.value || "").trim();
+  const password = String(form.password?.value || "");
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const nameOk = form.name ? String(form.name.value || "").trim().length > 0 : true;
+  return emailOk && password.length >= 6 && nameOk;
+}
+
+function syncAuthSubmitState() {
+  const form = document.getElementById("auth-form");
+  const btn = form?.querySelector('[type="submit"]');
+  if (!form || !btn) return;
+  const ok = authValid(form);
+  btn.disabled = !ok || btn.classList.contains("is-loading");
+  btn.classList.toggle("is-ready", ok && !btn.classList.contains("is-loading"));
+}
+
 function authScreen() {
   const register = S.authMode !== "login";
+  const nameField = register
+    ? `<div class="field icon-field">
+        <label for="name">Your name</label>
+        ${fieldIcon("person")}
+        <input id="name" name="name" maxlength="40" required autocomplete="name" placeholder="Your name">
+        <p class="field-hint" data-hint="name" hidden></p>
+      </div>`
+    : "";
   return `<div class="auth-wrap">
-    <button class="text-btn" type="button" data-act="go" data-route="landing">← Back</button>
-    <div class="auth-card glass-card">
+    <button class="btn ghost auth-back" type="button" data-act="go" data-route="landing">← Back</button>
+    <div class="auth-card">
       <div class="brand brand-center">${mark("full")}</div>
-      <p class="tagline">A private bubble for two, however far apart.</p>
-      <p class="empty auth-lede">${register ? "Three quick steps to your shared bubble." : "Welcome back — pick up where you left off."}</p>
-      ${register ? `<ol class="onboard-steps compact">
-        <li><span class="step-n">1</span><span>Choose your name &amp; username</span></li>
-        <li><span class="step-n">2</span><span>Invite your partner by username</span></li>
-        <li><span class="step-n">3</span><span>Chat, watch, and play inside your bubble</span></li>
-      </ol>` : ""}
-      <div class="tabs">
+      <h1 class="auth-headline">Your private bubble for two.</h1>
+      <p class="auth-sub">A private bubble for two, however far apart.</p>
+      ${register ? `<div class="auth-steps">
+        <div class="auth-step"><span class="step-n">1</span><strong>Pick your name</strong></div>
+        <div class="auth-step"><span class="step-n">2</span><strong>Invite your partner</strong></div>
+        <div class="auth-step"><span class="step-n">3</span><strong>Chat, watch &amp; play</strong></div>
+      </div>
+      <p class="auth-username-note">You'll get a fun username automatically, and you can change it anytime.</p>` : `<p class="auth-welcome">Welcome back — pick up where you left off.</p>`}
+      <div class="tabs auth-tabs">
         <button class="tab ${register ? "on" : ""}" type="button" data-act="auth-tab" data-mode="register">Create</button>
         <button class="tab ${register ? "" : "on"}" type="button" data-act="auth-tab" data-mode="login">Sign in</button>
       </div>
       ${errorHtml()}
-      <form id="auth-form" data-form="${register ? "register" : "login"}" class="stack">
-        ${register ? `<div class="field"><label for="name">Your name</label><input id="name" name="name" maxlength="40" required autocomplete="name" placeholder="What they call you"></div>` : ""}
-        <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email"></div>
-        <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${register ? "new-password" : "current-password"}"></div>
-        <button class="btn rose" type="submit">${register ? "Create my bubble" : "Sign in"}</button>
+      <form id="auth-form" data-form="${register ? "register" : "login"}" class="stack" novalidate>
+        ${nameField}
+        <div class="field icon-field">
+          <label for="email">Email</label>
+          ${fieldIcon("mail")}
+          <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com">
+          <p class="field-hint" data-hint="email" hidden></p>
+        </div>
+        <div class="field icon-field">
+          <label for="password">Password</label>
+          ${fieldIcon("lock")}
+          <input id="password" name="password" type="password" minlength="6" required autocomplete="${register ? "new-password" : "current-password"}" placeholder="At least 8 characters">
+          <button class="pw-toggle" type="button" data-act="toggle-password" aria-label="Show password">Show</button>
+          <p class="field-hint" data-hint="password" hidden></p>
+        </div>
+        ${register ? "" : `<p class="auth-forgot"><button class="text-btn" type="button" data-act="forgot-password">Forgot password?</button></p>`}
+        <button class="btn rose auth-submit" type="submit" disabled>${register ? "Create my bubble" : "Sign in"}</button>
       </form>
+      <p class="auth-private">Private by design. Your bubble is only for the two of you. <a href="terms.php" target="_blank" rel="noopener">Terms</a> · <a href="privacy.php" target="_blank" rel="noopener">Privacy</a></p>
+    </div>
+    <div class="auth-features">
+      <span>💬 Chat</span>
+      <span>🎬 Watch together</span>
+      <span>🎮 Play games</span>
+      <span>📸 Share moments</span>
     </div>
   </div>`;
 }
@@ -2153,6 +2223,7 @@ function render() {
 }
 
 function afterRender() {
+  if (S.route === "auth") syncAuthSubmitState();
   const list = document.getElementById("msgs");
   if (list) list.scrollTop = list.scrollHeight;
   const watchList = document.getElementById("watch-msgs");
@@ -2971,6 +3042,19 @@ async function onClick(event) {
       render();
       return;
     }
+    if (act === "toggle-password") {
+      const input = document.getElementById("password");
+      if (!input) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      el.textContent = show ? "Hide" : "Show";
+      el.setAttribute("aria-label", show ? "Hide password" : "Show password");
+      return;
+    }
+    if (act === "forgot-password") {
+      showFlash("Password reset isn’t in this version yet. If you’re stuck, create a note with your partner or try the email you used to sign up.");
+      return;
+    }
     if (act === "copy-user") return copyUsername();
     if (act === "emoji-toggle") {
       const key = el.dataset.for;
@@ -3340,12 +3424,39 @@ async function onSubmit(event) {
   const kind = form.dataset.form;
   const fd = new FormData(form);
   const button = form.querySelector('[type="submit"]');
-  if (button) button.disabled = true;
+  if (button && kind !== "register" && kind !== "login") button.disabled = true;
   showError("");
   try {
     if (kind === "register" || kind === "login") {
-      const json = { email: fd.get("email"), password: fd.get("password") };
-      if (kind === "register") json.displayName = fd.get("name");
+      const email = String(fd.get("email") || "").trim();
+      const password = String(fd.get("password") || "");
+      const name = String(fd.get("name") || "").trim();
+      const emailHint = form.querySelector('[data-hint="email"]');
+      const passHint = form.querySelector('[data-hint="password"]');
+      const nameHint = form.querySelector('[data-hint="name"]');
+      if (emailHint) { emailHint.hidden = true; emailHint.textContent = ""; }
+      if (passHint) { passHint.hidden = true; passHint.textContent = ""; }
+      if (nameHint) { nameHint.hidden = true; nameHint.textContent = ""; }
+      let invalid = false;
+      if (kind === "register" && !name) {
+        if (nameHint) { nameHint.hidden = false; nameHint.textContent = "Tell us what they call you."; }
+        invalid = true;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        if (emailHint) { emailHint.hidden = false; emailHint.textContent = "That email looks off."; }
+        invalid = true;
+      }
+      if (password.length < 6) {
+        if (passHint) { passHint.hidden = false; passHint.textContent = "Use at least 6 characters for your password."; }
+        invalid = true;
+      }
+      if (invalid) return;
+      if (button) {
+        button.classList.add("is-loading");
+        button.disabled = true;
+      }
+      const json = { email, password };
+      if (kind === "register") json.displayName = name;
       await api(kind, { method: "POST", json });
       await refreshState();
       await go(S.bubble?.status === "active" ? "home" : "bubbles", { force: true });
@@ -3617,9 +3728,23 @@ async function onSubmit(event) {
       showFlash("Playing together.");
     }
   } catch (err) {
-    showError(err.message || "Something went wrong.");
+    const msg = friendlyAuthError(err.message);
+    if (kind === "register" || kind === "login") {
+      const emailHint = form.querySelector('[data-hint="email"]');
+      if (emailHint && /email/i.test(msg)) {
+        emailHint.hidden = false;
+        emailHint.textContent = msg;
+      } else {
+        showError(msg);
+      }
+    } else {
+      showError(err.message || "Something went wrong.");
+    }
   } finally {
-    if (button && button.isConnected) button.disabled = false;
+    if (button && button.isConnected) {
+      button.classList.remove("is-loading");
+      button.disabled = kind === "register" || kind === "login" ? !authValid(form) : false;
+    }
   }
 }
 
@@ -3629,6 +3754,11 @@ document.addEventListener("click", (event) => {
   closeEmojiBars();
 });
 document.addEventListener("input", (event) => {
+  if (event.target.closest("#auth-form")) {
+    const hint = event.target.closest(".field")?.querySelector(".field-hint");
+    if (hint) { hint.hidden = true; hint.textContent = ""; }
+    syncAuthSubmitState();
+  }
   const input = event.target.closest("[data-look-color]");
   if (!input || !S.user) return;
   const patch = { [input.dataset.lookColor]: input.value };
