@@ -1419,9 +1419,9 @@ function authScreen() {
           <button class="pw-toggle" type="button" data-act="toggle-password" aria-label="Show password">Show</button>
           <p class="field-hint" data-hint="password" hidden></p>
         </div>
-        ${register ? "" : `<p class="auth-forgot"><button class="text-btn" type="button" data-act="forgot-password">Forgot password?</button></p>`}
         <button class="btn rose auth-submit" type="submit" disabled>${register ? "Create my bubble" : "Sign in"}</button>
       </form>
+      ${register ? "" : `<p class="auth-forgot"><button class="text-btn" type="button" data-act="forgot-password">Forgot password?</button></p>`}
       <p class="auth-private">Private by design. Your bubble is only for the two of you. <a href="terms.php" target="_blank" rel="noopener">Terms</a> · <a href="privacy.php" target="_blank" rel="noopener">Privacy</a></p>
     </div>
     <div class="auth-features">
@@ -3168,6 +3168,7 @@ async function copyUsername() {
 async function onClick(event) {
   const el = event.target.closest("[data-act]");
   if (!el) return;
+  event.preventDefault();
   const act = el.dataset.act;
   try {
     if (act === "go") {
@@ -3262,7 +3263,11 @@ async function onClick(event) {
       S.resetMask = data.masked || maskResetEmail(S.resetEmail);
       S.resetExpiresAt = Date.now() + (data.expiresIn || 600) * 1000;
       S.resetCooldownUntil = Date.now() + (data.cooldown || 60) * 1000;
-      showFlash(data.message || "If that email is registered, a code is on its way.");
+      let note = data.message || "If that email is registered, a code is on its way.";
+      if (data.mailReady === false) {
+        note += " Mail isn’t set up on this computer yet, so a code can’t arrive until SMTP is added in .env.";
+      }
+      showFlash(note);
       render();
       return;
     }
@@ -3653,6 +3658,9 @@ async function onSubmit(event) {
       S.resetExpiresAt = Date.now() + (data.expiresIn || 600) * 1000;
       S.resetCooldownUntil = Date.now() + (data.cooldown || 60) * 1000;
       S.flash = data.message || "If that email is registered, a code is on its way.";
+      if (data.mailReady === false) {
+        S.flash += " Mail isn’t set up on this computer yet, so a code can’t arrive until SMTP is added in .env.";
+      }
       S.error = "";
       render();
       return;

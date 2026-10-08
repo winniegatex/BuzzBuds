@@ -64,6 +64,7 @@ function handle_forgot_password(): void
     $stmt = $db->prepare('SELECT * FROM users WHERE email = ?');
     $stmt->execute([$email]);
     $user = $stmt->fetch();
+    $mailReady = mail_configured();
     if ($user) {
         $uid = (int) $user['id'];
         $now = time();
@@ -72,9 +73,17 @@ function handle_forgot_password(): void
         $hash = password_hash($code, PASSWORD_DEFAULT);
         $db->prepare('INSERT INTO password_resets (user_id, code_hash, expires_at, used, attempts, created_at) VALUES (?,?,?,0,0,?)')
             ->execute([$uid, $hash, $now + 600, $now]);
-        send_reset_code_mail($email, $code);
+        if ($mailReady) {
+            send_reset_code_mail($email, $code);
+        }
     }
-    json_ok(['message' => $generic, 'masked' => mask_email($email), 'cooldown' => 60, 'expiresIn' => 600]);
+    json_ok([
+        'message' => $generic,
+        'masked' => mask_email($email),
+        'cooldown' => 60,
+        'expiresIn' => 600,
+        'mailReady' => $mailReady,
+    ]);
 }
 
 function handle_verify_reset_code(): void

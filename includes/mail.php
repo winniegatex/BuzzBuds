@@ -35,6 +35,11 @@ function mail_from_header(): string
     return sprintf('%s <%s>', $name, $email);
 }
 
+function mail_configured(): bool
+{
+    return env_value('SMTP_HOST') !== '' && env_value('SMTP_USER') !== '' && env_value('SMTP_PASS') !== '';
+}
+
 function send_mail(string $to, string $subject, string $html, string $text): bool
 {
     $host = env_value('SMTP_HOST');

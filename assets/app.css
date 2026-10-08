@@ -281,8 +281,8 @@ body.brand-shell.theme-dark.auth-glow {
   cursor: pointer;
 }
 .field-hint { margin: 0; font-size: 13px; color: #9B0A6B; }
-.auth-forgot { margin: -4px 0 0; text-align: right; }
-.auth-forgot .text-btn { color: #9B0A6B; font-weight: 700; min-height: 36px; }
+.auth-forgot { margin: 10px 0 0; text-align: center; }
+.auth-forgot .text-btn { color: #9B0A6B; font-weight: 700; min-height: 44px; padding: 8px 12px; }
 .auth-submit { width: 100%; min-height: 48px; font-size: 17px; font-weight: 800; }
 .auth-submit:disabled {
   opacity: 0.55;
