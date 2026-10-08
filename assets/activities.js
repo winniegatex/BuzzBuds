@@ -75,7 +75,7 @@ const BuzzActivities = (() => {
             <div class="react-bar">${react}</div>
           </article>`;
         }).join("")
-      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span><p>No songs yet. Add the one that reminds you of them.</p></div>`;
+      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true">${typeof BuzzLogo !== "undefined" ? BuzzLogo.html("icon") : ""}</span><p>No songs yet. Add the one that reminds you of them.</p></div>`;
     const body = `<form data-form="activity-playlist" class="stack">
       <input name="title" placeholder="Song title" maxlength="120">
       <input name="url" placeholder="Spotify / YouTube link (optional)">
@@ -101,7 +101,7 @@ const BuzzActivities = (() => {
     const otd = feed?.onThisDay || [];
     const list = items.length
       ? items.map((it) => `<article class="timeline-item glass"><time>${esc(it.date)}</time><strong>${esc(it.title)}</strong><span class="pill">${esc(it.kind)}</span></article>`).join("")
-      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span><p>Your timeline is waiting for its first chapter.</p></div>`;
+      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true">${typeof BuzzLogo !== "undefined" ? BuzzLogo.html("icon") : ""}</span><p>Your timeline is waiting for its first chapter.</p></div>`;
     const otdHtml = otd.length ? `<section class="gap-top"><h3>On this day</h3>${otd.map((it) => `<p>${esc(it.title)} · ${esc(it.date)}</p>`).join("")}</section>` : "";
     const body = `<form data-form="activity-milestone" class="stack">
       <input name="title" placeholder="Milestone (first date, move-in…)" maxlength="80" required>

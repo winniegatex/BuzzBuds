@@ -139,14 +139,30 @@ function send_mail(string $to, string $subject, string $html, string $text): boo
     }
 }
 
+function brand_logo_url(string $variant = 'full'): string
+{
+    $file = $variant === 'icon' ? 'logo-icon.png' : 'logo-full.png';
+    $base = rtrim(env_value('APP_URL', ''), '/');
+    if ($base === '') {
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        $script = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? ''));
+        $dir = rtrim($script, '/');
+        $base = $host !== '' ? ($https . '://' . $host . $dir) : '';
+    }
+    $path = 'public/brand/' . $file . '?v=31';
+    return $base !== '' ? ($base . '/' . $path) : $path;
+}
+
 function branded_email(string $headline, string $bodyHtml, string $code = ''): array
 {
     $codeBlock = $code !== ''
         ? '<p style="font-size:36px;letter-spacing:10px;font-weight:800;color:#9B0A6B;text-align:center;margin:24px 0">' . htmlspecialchars($code, ENT_QUOTES) . '</p>'
         : '';
+    $logo = brand_logo_url('full');
     $html = '<!DOCTYPE html><html><body style="margin:0;background:#4A1038;padding:24px;font-family:Nunito,Segoe UI,sans-serif">'
         . '<div style="max-width:480px;margin:0 auto;background:#FFF4F5;border-radius:28px;padding:28px;color:#4A1038">'
-        . '<p style="text-align:center;font-weight:800;font-size:22px;color:#9B0A6B;margin:0 0 8px">BuzzBuds</p>'
+        . '<p style="text-align:center;margin:0 0 12px"><img src="' . htmlspecialchars($logo, ENT_QUOTES) . '" alt="BuzzBuds" width="168" style="width:168px;max-width:70%;height:auto;border:0;display:inline-block;background:transparent"></p>'
         . '<h1 style="font-size:22px;color:#9B0A6B;text-align:center">' . htmlspecialchars($headline, ENT_QUOTES) . '</h1>'
         . $codeBlock
         . '<div style="font-size:16px;line-height:1.5">' . $bodyHtml . '</div>'

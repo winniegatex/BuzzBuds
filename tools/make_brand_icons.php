@@ -1,91 +1,68 @@
 <?php
 declare(strict_types=1);
 
-$root = dirname(__DIR__) . '/assets';
-$srcPath = $root . '/logo.png';
-$src = imagecreatefrompng($srcPath);
-if (!$src) {
-    fwrite(STDERR, "Could not read logo.png\n");
+$root = dirname(__DIR__);
+$brand = $root . '/public/brand';
+if (!is_dir($brand) && !mkdir($brand, 0775, true) && !is_dir($brand)) {
+    fwrite(STDERR, "Could not create public/brand\n");
     exit(1);
 }
+
+$sources = [
+    'logo-full.png' => $root . '/assets/logo-full.png',
+    'logo-icon.png' => $root . '/assets/logo-icon.png',
+    'app-icon-512.png' => $root . '/assets/app-icon-512.png',
+];
+foreach ($sources as $name => $from) {
+    $to = $brand . '/' . $name;
+    if (!is_file($from)) {
+        if (!is_file($to)) {
+            fwrite(STDERR, "Missing {$from}\n");
+            exit(1);
+        }
+        continue;
+    }
+    if (!copy($from, $to)) {
+        fwrite(STDERR, "Could not copy {$name}\n");
+        exit(1);
+    }
+}
+
+$srcPath = $brand . '/app-icon-512.png';
+$src = imagecreatefrompng($srcPath);
+if (!$src) {
+    fwrite(STDERR, "Could not read app-icon-512.png\n");
+    exit(1);
+}
+imagesavealpha($src, true);
 $sw = imagesx($src);
 $sh = imagesy($src);
 
-function hex(int $r, int $g, int $b): array
+function resample_contain($src, int $sw, int $sh, int $dw, int $dh)
 {
-    return [$r, $g, $b];
-}
-
-function paint_round_rect($im, int $size, array $tl, array $br): void
-{
-    $blush = imagecolorallocate($im, 253, 224, 227);
-    imagefilledrectangle($im, 0, 0, $size, $size, $blush);
-    for ($y = 0; $y < $size; $y++) {
-        $t = $size > 1 ? $y / ($size - 1) : 0;
-        $r = (int) round($tl[0] + ($br[0] - $tl[0]) * $t);
-        $g = (int) round($tl[1] + ($br[1] - $tl[1]) * $t);
-        $b = (int) round($tl[2] + ($br[2] - $tl[2]) * $t);
-        $c = imagecolorallocatealpha($im, $r, $g, $b, 96);
-        imageline($im, 0, $y, $size, $y, $c);
-    }
-}
-
-function crop_square($src, int $sw, int $sh)
-{
-    $side = min($sw, (int) round($sh * 0.72));
-    $x = (int) max(0, ($sw - $side) / 2);
-    $y = (int) max(0, $sh * 0.04);
-    if ($x + $side > $sw) {
-        $x = 0;
-        $side = $sw;
-    }
-    if ($y + $side > $sh) {
-        $y = 0;
-        $side = min($sw, $sh);
-    }
-    $out = imagecreatetruecolor($side, $side);
+    $out = imagecreatetruecolor($dw, $dh);
     imagealphablending($out, false);
     imagesavealpha($out, true);
     $clear = imagecolorallocatealpha($out, 0, 0, 0, 127);
-    imagefilledrectangle($out, 0, 0, $side, $side, $clear);
+    imagefilledrectangle($out, 0, 0, $dw, $dh, $clear);
+    $scale = min($dw / $sw, $dh / $sh);
+    $tw = (int) round($sw * $scale);
+    $th = (int) round($sh * $scale);
+    $ox = (int) (($dw - $tw) / 2);
+    $oy = (int) (($dh - $th) / 2);
     imagealphablending($out, true);
-    imagecopy($out, $src, 0, 0, $x, $y, $side, $side);
+    imagecopyresampled($out, $src, $ox, $oy, 0, 0, $tw, $th, $sw, $sh);
     return $out;
 }
 
-function save_png($im, string $path): void
-{
-    imagepng($im, $path, 6);
-}
-
-$crop = crop_square($src, $sw, $sh);
-$cw = imagesx($crop);
-$ch = imagesy($crop);
-
 foreach ([32, 180, 192, 512] as $size) {
-    $im = imagecreatetruecolor($size, $size);
-    imagealphablending($im, true);
-    imagesavealpha($im, true);
-    paint_round_rect($im, $size, [249, 123, 110], [242, 112, 156]);
-    $pad = (int) round($size * 0.08);
-    $inner = $size - $pad * 2;
-    imagecopyresampled($im, $crop, $pad, $pad, 0, 0, $inner, $inner, $cw, $ch);
-    save_png($im, $root . "/icon-{$size}.png");
+    $im = resample_contain($src, $sw, $sh, $size, $size);
+    imagepng($im, $brand . "/icon-{$size}.png", 6);
     imagedestroy($im);
 }
 
-$og = imagecreatetruecolor(1200, 630);
-imagealphablending($og, true);
-imagesavealpha($og, false);
-$blush = imagecolorallocate($og, 253, 224, 227);
-imagefilledrectangle($og, 0, 0, 1200, 630, $blush);
-$targetH = 420;
-$targetW = (int) round($sw * ($targetH / $sh));
-$ox = (int) ((1200 - $targetW) / 2);
-$oy = 36;
-imagecopyresampled($og, $src, $ox, $oy, 0, 0, $targetW, $targetH, $sw, $sh);
-save_png($og, $root . '/og.png');
+$og = resample_contain($src, $sw, $sh, 1200, 630);
+imagepng($og, $brand . '/og.png', 6);
 imagedestroy($og);
-imagedestroy($crop);
 imagedestroy($src);
-echo "icons ok\n";
+echo "brand icons ok\n";

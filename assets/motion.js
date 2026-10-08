@@ -98,7 +98,7 @@ const BuzzMotion = (() => {
   function playMascot(mood, ms = 1400) {
     if (!active()) return;
     const layer = mascotLayer();
-    layer.innerHTML = `<span class="mascot mascot-${mood} mascot-pop"><img src="assets/logo-mark.svg" alt=""></span>`;
+    layer.innerHTML = `<span class="mascot mascot-${mood} mascot-pop">${typeof BuzzLogo !== "undefined" ? BuzzLogo.html("icon") : ""}</span>`;
     layer.hidden = false;
     window.setTimeout(() => {
       layer.innerHTML = "";

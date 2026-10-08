@@ -8,7 +8,7 @@ self.addEventListener("push", (event) => {
   } catch {
     /* keep defaults */
   }
-  event.waitUntil(self.registration.showNotification(title, { body, icon: "icon-192.png" }));
+  event.waitUntil(self.registration.showNotification(title, { body, icon: "../public/brand/icon-192.png?v=31" }));
 });
 
 self.addEventListener("notificationclick", (event) => {
@@ -19,6 +19,6 @@ self.addEventListener("notificationclick", (event) => {
 self.addEventListener("message", (event) => {
   const data = event.data || {};
   if (data.type === "notify") {
-    self.registration.showNotification(data.title || "BuzzBuds", { body: data.body || "", icon: "icon-192.png" });
+    self.registration.showNotification(data.title || "BuzzBuds", { body: data.body || "", icon: "../public/brand/icon-192.png?v=31" });
   }
 });

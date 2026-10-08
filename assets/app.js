@@ -856,15 +856,19 @@ function dayLabel(iso) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function logoHtml(variant = "icon") {
+  return window.BuzzLogo.html(variant);
+}
+
 function mark(kind = "icon") {
   if (kind === "full") {
-    return `<span class="brand-lockup full auth-logo-float"><img class="logo-full" src="assets/logo-mark.svg" alt="BuzzBuds" width="168" height="126"></span>`;
+    return `<span class="brand-lockup full auth-logo-float">${logoHtml("full")}</span>`;
   }
-  return `<span class="brand-lockup"><img class="mark" src="assets/icon.svg" alt="" width="36" height="36"><span class="wordmark">BuzzBuds</span></span>`;
+  return `<span class="brand-lockup">${logoHtml("icon")}<span class="wordmark">BuzzBuds</span></span>`;
 }
 
 function mascotHtml(mood = "idle") {
-  return `<span class="mascot mascot-${mood}" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span>`;
+  return `<span class="mascot mascot-${mood}" aria-hidden="true">${logoHtml("icon")}</span>`;
 }
 
 function icon(name) {
