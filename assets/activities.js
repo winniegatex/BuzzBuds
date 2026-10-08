@@ -165,19 +165,23 @@ const BuzzActivities = (() => {
     return activityShell("hub", "Favorites", "Hub", `<div class="stack">${list}</div>`);
   }
 
-  function hubHome(badges, heroHtml) {
+  function hubHome(badges, heroHtml, previews) {
     const b = badges || {};
-    const card = (route, icon, title, sub, badgeKey, tone, lobby) => {
+    const live = previews || {};
+    const card = (route, icon, title, sub, badgeKey, tone, lobby, previewKey) => {
       const n = b[badgeKey] || 0;
       const badge = n ? `<span class="hub-badge">${n > 9 ? "9+" : n}</span>` : "";
       const lobbyAttr = lobby ? ` data-lobby="1"` : "";
+      const preview = live[previewKey || route] || sub;
       return `<button class="hub-card ${tone}" type="button" data-act="go" data-route="${route}"${lobbyAttr}>
         <span class="hub-card-icon" aria-hidden="true">${icon}</span>
         ${badge}
         <strong>${esc(title)}</strong>
-        <span>${esc(sub)}</span>
+        <span class="hub-card-desc">${esc(sub)}</span>
+        <em class="hub-card-live">${esc(preview)}</em>
       </button>`;
     };
+    const chip = (route, icon, label) => `<button class="hub-chip" type="button" data-act="go" data-route="${route}" data-back-home="1"><span aria-hidden="true">${icon}</span>${esc(label)}</button>`;
     return `${typeof errorHtml === "function" ? errorHtml() : ""}${typeof flashHtml === "function" ? flashHtml() : ""}
       ${heroHtml || ""}
       <p class="eyebrow hub-section-label">Your bubble</p>
@@ -190,18 +194,21 @@ const BuzzActivities = (() => {
         ${card("notes", "💌", "Notes", "Pin sweet notes on the board", "notes", "tone-notes")}
         ${card("calendar", "📅", "Plan", "Dates, lists, and favorites", "hubPlan", "tone-plan")}
         ${card("draw", "✨", "Create", "Draw, jar, scrapbook, and more", "hubCreate", "tone-create")}
+        ${card("calendar", "🌙", "Date night", "Pick a night and lock it in", "hubPlan", "tone-plan", false, "datenight")}
       </div>
+      <p class="eyebrow hub-section-label">Quick access</p>
       <div class="hub-strip gap-top">
-        <button class="qbtn" type="button" data-act="go" data-route="daily" data-back-home="1">Daily question</button>
-        <button class="qbtn" type="button" data-act="go" data-route="mood" data-back-home="1">Mood</button>
-        <button class="qbtn" type="button" data-act="go" data-route="timeline" data-back-home="1">Timeline</button>
-        <button class="qbtn" type="button" data-act="go" data-route="playlist" data-back-home="1">Playlist</button>
-        <button class="qbtn" type="button" data-act="go" data-route="wyr" data-back-home="1">Quick match</button>
-        <button class="qbtn" type="button" data-act="go" data-route="bucket" data-back-home="1">Bucket list</button>
-        <button class="qbtn" type="button" data-act="go" data-route="quiz" data-back-home="1">Couple quiz</button>
-        <button class="qbtn" type="button" data-act="go" data-route="scrapbook" data-back-home="1">Scrapbook</button>
-        <button class="qbtn" type="button" data-act="go" data-route="jar" data-back-home="1">Love jar</button>
-        <button class="qbtn" type="button" data-act="go" data-route="search" data-back-home="1">Search</button>
+        ${chip("daily", "☀️", "Daily question")}
+        ${chip("mood", "💗", "Mood")}
+        ${chip("timeline", "🕰️", "Timeline")}
+        ${chip("playlist", "🎵", "Playlist")}
+        ${chip("wyr", "✨", "Quick match")}
+        ${chip("bucket", "🧳", "Bucket list")}
+        ${chip("draw", "✏️", "Drawing board")}
+        ${chip("quiz", "❓", "Couple quiz")}
+        ${chip("scrapbook", "📔", "Scrapbook")}
+        ${chip("jar", "💌", "Love jar")}
+        ${chip("search", "🔎", "Search")}
       </div>
       <form data-form="hub-search" class="row gap-top">
         <input name="q" placeholder="Search chat, notes, moments…" maxlength="80" class="grow">

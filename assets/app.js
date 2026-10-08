@@ -78,6 +78,11 @@ const S = {
   uiGameMenu: false,
   watchChatOpen: true,
   gameChatOpen: false,
+  sidebarCollapsed: localStorage.getItem("buzz-nav-collapsed") === "1",
+  visitPop: false,
+  hubActivity: null,
+  todayDaily: null,
+  todayMood: null,
   hashNav: false,
   resetStep: "",
   resetEmail: "",
@@ -465,6 +470,55 @@ function visitCountdownLabel(iso) {
   return `${days} days until you're together`;
 }
 
+function visitCountdownLive(iso) {
+  if (!iso) return "Set a date you'll see each other";
+  const target = new Date(`${iso}T12:00:00`);
+  const ms = target.getTime() - Date.now();
+  if (ms < -86400000) return "Visit time — soak it in";
+  if (ms < 0) return "Together today";
+  const days = Math.floor(ms / 86400000);
+  const hours = Math.floor((ms % 86400000) / 3600000);
+  const mins = Math.floor((ms % 3600000) / 60000);
+  if (days <= 0 && hours <= 0) return `${mins}m until you're together`;
+  if (days <= 0) return `${hours}h ${mins}m until you're together`;
+  return `${days}d ${hours}h ${mins}m until you're together`;
+}
+
+function dayTogetherHeadline(bubble) {
+  const days = typeof bubble?.daysTogether === "number"
+    ? bubble.daysTogether
+    : Math.max(0, Math.floor((Date.now() - new Date(bubble?.createdAt || Date.now()).getTime()) / 86400000));
+  const n = days <= 0 ? 1 : days;
+  return `Day ${n} together`;
+}
+
+function timeAgo(iso) {
+  if (!iso) return "";
+  const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+function hubCardPreviews() {
+  const lastNote = S.notes?.[0];
+  const lastMoment = S.moments?.[0];
+  const lastChat = S.chat?.length ? S.chat[S.chat.length - 1] : null;
+  const waiting = (S.gamesLobby || []).filter((g) => g.yourTurn);
+  const snippet = S.bubble?.snippet;
+  return {
+    chat: lastChat ? `${whoName(lastChat.senderId)} · ${timeAgo(lastChat.createdAt)}` : (snippet ? String(snippet).slice(0, 48) : "Private messages just for two"),
+    notes: lastNote ? `${whoName(lastNote.authorId)} sent a note ${timeAgo(lastNote.createdAt)}` : "Pin sweet notes on the board",
+    moments: lastMoment ? `${whoName(lastMoment.authorId)} shared ${timeAgo(lastMoment.createdAt)}` : "Photos, reactions, and comments",
+    games: waiting.length ? `Your turn in ${waiting.map((g) => gameTypeLabel(g.type)).join(", ")}` : "Boards, quizzes, and quick play",
+    watch: S.watch?.videoId ? "A video is queued for you both" : "Synced video and show chat",
+    calendar: S.bubble?.nextVisitAt ? visitCountdownLive(S.bubble.nextVisitAt) : "Dates, lists, and favorites",
+    draw: "Draw, jar, scrapbook, and more",
+    datenight: S.bubble?.nextVisitAt ? visitCountdownLive(S.bubble.nextVisitAt) : "Pick a night and lock it in",
+  };
+}
+
 function partnerStatusHtml() {
   const online = S.presence?.partnerOnline;
   const typing = S.presence?.partnerTyping && S.route === "chat";
@@ -477,25 +531,89 @@ function hubHeroHtml() {
   if (!S.bubble || S.bubble.status !== "active" || !S.user) return "";
   const me = S.user.displayName || "You";
   const them = partnerName();
-  const visit = visitCountdownLabel(S.bubble.nextVisitAt);
+  const visit = visitCountdownLive(S.bubble.nextVisitAt);
+  const pop = S.visitPop ? "" : "hidden";
   return `<section class="hub-hero glass">
     <div class="hub-hero-bg" aria-hidden="true"></div>
     <div class="hub-hero-pair">
-      <div class="hub-ava-wrap">${ava(me)}<span class="hub-ava-name">${esc(me.split(" ")[0] || "You")}</span></div>
+      <div class="hub-ava-wrap">${ava(me, "lg")}<span class="hub-ava-name">${esc(me.split(" ")[0] || "You")}</span></div>
       <div class="hub-hero-heart" aria-hidden="true"><span class="heart-line"></span><span class="heart-pulse">♥</span></div>
-      <div class="hub-ava-wrap">${ava(them)}<span class="hub-ava-name">${esc(them.split(" ")[0] || "Them")}</span></div>
+      <div class="hub-ava-wrap">${ava(them, "lg")}<span class="hub-ava-name">${esc(them.split(" ")[0] || "Them")}</span></div>
     </div>
-    <p class="hub-hero-days">${esc(daysTogetherLabel(S.bubble))}</p>
-    <p class="hub-hero-visit">${visit ? esc(visit) : "Set your next visit date below"}</p>
+    <p class="hub-hero-days">${esc(dayTogetherHeadline(S.bubble))}</p>
+    <p class="hub-hero-visit" id="visit-countdown">${esc(visit)}</p>
     <div class="hub-hero-actions row">
-      <button class="btn rose" type="button" data-act="thinking">Thinking of you</button>
-      <button class="btn soft" type="button" data-act="go" data-route="call">Video call</button>
+      <button class="btn rose hub-cta" type="button" data-act="thinking">Thinking of you</button>
+      <button class="btn soft hub-cta" type="button" data-act="go" data-route="call">Video call</button>
     </div>
-    <form data-form="visit" class="visit-form row hub-hero-visit">
-      <input type="date" name="nextVisit" value="${esc(S.bubble.nextVisitAt || "")}" aria-label="Next visit date">
-      <button class="btn ghost" type="submit">Save visit</button>
-    </form>
+    <div class="visit-wrap">
+      <button class="btn ghost" type="button" data-act="visit-toggle">Set next visit</button>
+      <div class="visit-pop glass" ${pop}>
+        <form data-form="visit" class="visit-form stack">
+          <label for="next-visit-date">Next visit</label>
+          <input id="next-visit-date" type="date" name="nextVisit" value="${esc(S.bubble.nextVisitAt || "")}" aria-label="Next visit date">
+          <button class="btn rose" type="submit">Save</button>
+        </form>
+      </div>
+    </div>
   </section>`;
+}
+
+function todayRailInner() {
+  const daily = S.todayDaily || {};
+  const mood = S.todayMood || {};
+  const events = (S.hubActivity?.calendar || []).slice(0, 4);
+  const waiting = (S.gamesLobby || []).filter((g) => g.yourTurn);
+  const feed = [];
+  if (S.notes?.[0]) feed.push(`${whoName(S.notes[0].authorId)} left a note ${timeAgo(S.notes[0].createdAt)}`);
+  if (S.moments?.[0]) feed.push(`${whoName(S.moments[0].authorId)} shared a moment ${timeAgo(S.moments[0].createdAt)}`);
+  if (S.chat?.length) {
+    const last = S.chat[S.chat.length - 1];
+    feed.push(`${whoName(last.senderId)} in chat ${timeAgo(last.createdAt)}`);
+  }
+  waiting.forEach((g) => feed.push(`Your turn in ${gameTypeLabel(g.type)}`));
+  const dailyBody = daily.question
+    ? `<p class="rail-q">${esc(daily.question)}</p>
+       ${daily.mine ? `<p class="empty">Answer saved.</p>` : `<button class="btn rose" type="button" data-act="go" data-route="daily" data-back-home="1">Answer</button>`}`
+    : `<p class="empty">Today's question will land here.</p>
+       <button class="btn ghost" type="button" data-act="go" data-route="daily" data-back-home="1">Open</button>`;
+  const moodLine = `<p>You ${mood.mine ? esc(mood.mine) : "—"} · ${esc(partnerName())} ${mood.theirs ? esc(mood.theirs) : "—"}</p>
+    <button class="btn ghost" type="button" data-act="go" data-route="mood" data-back-home="1">Check in</button>`;
+  const dates = events.length
+    ? events.map((e) => `<p>${esc(e.title || "Date")} · ${esc(e.at || e.date || "")}</p>`).join("")
+    : `<p class="empty">No dates yet.</p>`;
+  const feedHtml = feed.length ? feed.slice(0, 6).map((line) => `<p>${esc(line)}</p>`).join("") : `<p class="empty">Quiet for now.</p>`;
+  return `<p class="eyebrow">Today</p>
+    <article class="rail-card glass"><h3>Daily question</h3>${dailyBody}</article>
+    <article class="rail-card glass"><h3>Moods</h3>${moodLine}</article>
+    <article class="rail-card glass"><h3>Next visit</h3><p id="visit-countdown-rail">${esc(visitCountdownLive(S.bubble?.nextVisitAt))}</p>
+      <button class="btn ghost" type="button" data-act="visit-toggle">Set date</button></article>
+    <article class="rail-card glass"><h3>Upcoming</h3>${dates}
+      <button class="btn ghost" type="button" data-act="go" data-route="calendar" data-back-home="1">Calendar</button></article>
+    <article class="rail-card glass"><h3>Recent</h3>${feedHtml}</article>`;
+}
+
+function todayRailHtml() {
+  if (!S.user || !S.bubble || S.bubble.status !== "active") return "";
+  return `<aside class="rail" id="today-rail">${todayRailInner()}</aside>`;
+}
+
+async function hydrateTodayRail() {
+  if (S.route !== "home" || !S.bubble || S.bubble.status !== "active") return;
+  try {
+    const [hub, daily, mood] = await Promise.all([
+      api("activity", { query: { key: "hub" } }),
+      api("activity", { query: { key: "daily" } }),
+      api("activity", { query: { key: "mood" } }),
+    ]);
+    S.hubActivity = hub.activity || S.hubActivity;
+    S.todayDaily = daily.activity || S.todayDaily;
+    S.todayMood = mood.activity || S.todayMood;
+    const rail = document.getElementById("today-rail");
+    if (rail && S.route === "home") rail.innerHTML = todayRailInner();
+  } catch {
+    /* keep whatever is already painted */
+  }
 }
 
 function paintPartnerStatus() {
@@ -1540,7 +1658,7 @@ function quickActions() {
 
 function homeScreen() {
   const hero = hubHeroHtml();
-  if (typeof BuzzActivities !== "undefined") return BuzzActivities.hubHome(S.badges, hero);
+  if (typeof BuzzActivities !== "undefined") return BuzzActivities.hubHome(S.badges, hero, hubCardPreviews());
   return `${errorHtml()}${flashHtml()}<p class="empty">Almost there…</p>`;
 }
 
@@ -1795,9 +1913,17 @@ function appendChatMessage(message) {
 function chatScreen() {
   return `<div class="pane-chat">
     ${errorHtml()}${screenBar(partnerName(), "Chat")}
-    ${partnerStatusHtml()}
-    <div id="msgs" class="msgs">${msgsHtml(S.chat)}</div>
-    ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}
+    <div class="chat-body">
+      <aside class="chat-rail">
+        <p class="eyebrow">Bubbles</p>
+        ${peopleNav()}
+      </aside>
+      <div class="chat-thread">
+        ${partnerStatusHtml()}
+        <div id="msgs" class="msgs">${msgsHtml(S.chat)}</div>
+        ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}
+      </div>
+    </div>
   </div>`;
 }
 
@@ -2374,16 +2500,22 @@ function appShell(content) {
     ["notes", "Notes", "note"],
     ["more", "More", "more"],
   ];
-  return `<div class="shell">
+  return `<div class="shell ${S.sidebarCollapsed ? "nav-collapsed" : ""}">
     <aside class="sidebar">
-      <button class="brand text-btn" type="button" data-act="go" data-route="home">${mark()}</button>
+      <div class="side-head">
+        <button class="brand text-btn" type="button" data-act="go" data-route="home">${mark()}</button>
+        <button class="nav-collapse" type="button" data-act="nav-collapse" aria-label="${S.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}">${S.sidebarCollapsed ? "»" : "«"}</button>
+      </div>
       ${peopleNav()}
       <nav class="side-nav">
         ${items.map(([route, label, ic]) => navButtonHtml(route, label, ic)).join("")}
       </nav>
       <div class="you-chip ${S.presence?.partnerOnline ? "partner-here" : ""}">${ava(partnerName())}<div><strong>${esc(partnerName())}</strong><small>@${esc(S.bubble.partner.username)}</small></div></div>
     </aside>
-    <main class="main"><div id="screen" class="${S.route === "chat" ? "is-chat" : S.route === "watch" ? "is-watch" : S.route === "games" && S.gameType ? "is-game" : ""}">${content}</div></main>
+    <div class="workspace">
+      <main class="main"><div id="screen" class="${S.route === "chat" ? "is-chat" : S.route === "watch" ? "is-watch" : S.route === "games" && S.gameType ? "is-game" : ""}">${content}</div></main>
+      ${S.route === "home" ? todayRailHtml() : ""}
+    </div>
     <nav class="tabbar">
       ${tabs.map(([route, label, ic]) => tabButtonHtml(route, label, ic)).join("")}
     </nav>
@@ -2475,6 +2607,13 @@ function afterRender() {
   document.querySelectorAll(".composer textarea").forEach(growComposer);
   syncViewportHeight();
   scrollChatToEnd();
+  if (S.route === "home") hydrateTodayRail().catch(() => {});
+  if (!S.visitClock) {
+    S.visitClock = window.setInterval(() => {
+      const text = visitCountdownLive(S.bubble?.nextVisitAt);
+      document.querySelectorAll("#visit-countdown, #visit-countdown-rail").forEach((el) => { el.textContent = text; });
+    }, 30000);
+  }
   pullPresence().catch(() => {});
   if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
     paintActivityComments();
@@ -3259,6 +3398,23 @@ async function onClick(event) {
       render();
       return;
     }
+    if (act === "nav-collapse") {
+      S.sidebarCollapsed = !S.sidebarCollapsed;
+      localStorage.setItem("buzz-nav-collapsed", S.sidebarCollapsed ? "1" : "0");
+      document.querySelector(".shell")?.classList.toggle("nav-collapsed", S.sidebarCollapsed);
+      const btn = document.querySelector(".nav-collapse");
+      if (btn) {
+        btn.textContent = S.sidebarCollapsed ? "»" : "«";
+        btn.setAttribute("aria-label", S.sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar");
+      }
+      return;
+    }
+    if (act === "visit-toggle") {
+      S.visitPop = !S.visitPop;
+      document.querySelectorAll(".visit-pop").forEach((el) => { el.hidden = !S.visitPop; });
+      if (!document.querySelector(".visit-pop")) render();
+      return;
+    }
     if (act === "activity-chat-toggle") {
       const layout = document.querySelector(".activity-layout");
       if (layout) layout.classList.toggle("chat-open");
@@ -3852,6 +4008,7 @@ async function onSubmit(event) {
         const inList = (S.bubbles || []).find((b) => b.id === data.bubble.id);
         if (inList) Object.assign(inList, data.bubble);
       }
+      S.visitPop = false;
       showFlash(raw ? "Visit date saved." : "Visit date cleared.");
       render();
       return;
