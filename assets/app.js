@@ -1,0 +1,3133 @@
+const NOTE_COLORS = {
+  cream: "#fff1df",
+  blush: "#ffd5cc",
+  butter: "#ffe6a6",
+  mint: "#d7f3e4",
+  lilac: "#eadfff",
+  sky: "#d9ecff",
+};
+
+const S = {
+  user: null,
+  bubble: null,
+  bubbleId: Number(sessionStorage.getItem("buzz-bubble") || 0),
+  bubbles: [],
+  incomingBubbleId: null,
+  callBubbleId: null,
+  preview: null,
+  route: "landing",
+  renderedRoute: null,
+  authMode: "register",
+  error: "",
+  flash: "",
+  bootError: "",
+  chat: [],
+  notes: [],
+  notesSig: "",
+  moments: [],
+  momentsSig: "",
+  momentOpen: 0,
+  momentComments: {},
+  game: null,
+  gameType: null,
+  selected: null,
+  solSel: null,
+  watch: null,
+  watchComments: [],
+  watchCommentsVideo: "",
+  watchCommentsSig: "",
+  gameComments: [],
+  gameCommentsType: "",
+  gameCommentsSig: "",
+  turnHadMine: undefined,
+  badges: { bubbles: 0, chat: 0, notes: 0, moments: 0, watch: 0, games: 0 },
+  badgePrev: {},
+  presence: { partnerOnline: false, partnerTyping: false },
+  partnerOnlineWas: false,
+  momentsReactSig: "",
+  gameWinnerWas: null,
+  activity: null,
+  activityKey: null,
+  activityComments: {},
+  activityCommentsSig: {},
+  timelineFeed: null,
+  drawColor: "#e85d6f",
+  drawStrokes: [],
+  searchResults: [],
+  scrapSticker: "📎",
+  jarSticker: "💌",
+  player: null,
+  watchLoadPending: null,
+  applyingWatch: false,
+  clockOffset: 0,
+  lastSignalId: 0,
+  signalsReady: false,
+  incomingOffer: null,
+  earlyIce: [],
+  noteColor: "blush",
+  callStatus: "",
+  micOff: false,
+  camOff: false,
+  askLeave: false,
+  navLock: false,
+  ticking: false,
+  beat: 0,
+};
+
+const Call = { pc: null, local: null, remote: null, active: false, making: false };
+let signalChain = Promise.resolve();
+
+function esc(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+}
+
+function escBr(value) {
+  return esc(value).replace(/\n/g, "<br>");
+}
+
+function linkify(value) {
+  return esc(value).replace(
+    /(https?:\/\/[^\s<]+)/g,
+    '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>'
+  );
+}
+
+const MOMENT_REACTS = ["❤️", "😍", "🔥", "😂", "👏", "🥰", "✨", "😮"];
+
+const CHAT_EMOJIS = [
+  "😀", "😂", "🥰", "😍", "😘", "😊", "🙂", "😭", "😮", "🤔", "😴", "🤗",
+  "👍", "👏", "🙌", "🫶", "💪", "✌️", "🤞", "👀", "🙈", "💋",
+  "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "💕", "💖", "💘", "💝",
+  "🌹", "🌸", "✨", "⭐️", "🔥", "🎉", "🎬", "🍿", "☕", "🌙", "🌈", "💬",
+];
+
+function isEmojiHeavy(text) {
+  const stripped = String(text || "").replace(/\s/g, "");
+  if (!stripped || stripped.length > 16) return false;
+  return !/[a-zA-Z0-9]/.test(stripped);
+}
+
+function formatChatBody(text) {
+  const cls = isEmojiHeavy(text) ? "msg-emoji" : "";
+  return cls ? `<p class="${cls}">${linkify(text)}</p>` : `<p>${linkify(text)}</p>`;
+}
+
+function emojiBarHtml(formKey) {
+  const buttons = CHAT_EMOJIS.map((emoji) => `<button type="button" class="emoji-pick" data-act="emoji-pick" data-for="${formKey}" data-emoji="${emoji}" aria-label="${emoji}">${emoji}</button>`).join("");
+  return `<div class="emoji-bar" data-emoji-for="${formKey}" hidden>${buttons}</div>`;
+}
+
+function chatComposerHtml(formKey, { max, placeholder, disabled = false, extraClass = "" } = {}) {
+  const off = disabled ? "disabled" : "";
+  const hide = disabled ? "hidden" : "";
+  return `<form data-form="${formKey}" class="composer chat-compose ${extraClass}" ${hide}>
+    <button type="button" class="btn soft emoji-btn" data-act="emoji-toggle" data-for="${formKey}" aria-label="Add emoji" ${off}>😊</button>
+    <input name="body" maxlength="${max}" placeholder="${esc(placeholder)}" autocomplete="off" ${off}>
+    <button class="btn rose" type="submit" ${off}>Send</button>
+    ${emojiBarHtml(formKey)}
+  </form>`;
+}
+
+function insertAtCursor(input, text) {
+  if (!input) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? start;
+  const next = input.value.slice(0, start) + text + input.value.slice(end);
+  const max = Number(input.maxLength);
+  if (max > 0 && next.length > max) return;
+  input.value = next;
+  const pos = start + text.length;
+  input.setSelectionRange(pos, pos);
+  input.focus();
+}
+
+function closeEmojiBars(except) {
+  document.querySelectorAll(".emoji-bar").forEach((bar) => {
+    if (!except || bar.dataset.emojiFor !== except) bar.hidden = true;
+  });
+}
+
+let turnAudio = null;
+
+function playTurnRing() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    if (!turnAudio) turnAudio = new Ctx();
+    if (turnAudio.state === "suspended") turnAudio.resume();
+    const ctx = turnAudio;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.14;
+    gain.connect(ctx.destination);
+    const tones = [
+      [740, 0],
+      [988, 0.16],
+      [1175, 0.32],
+    ];
+    tones.forEach(([freq, start]) => {
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      const noteGain = ctx.createGain();
+      noteGain.gain.setValueAtTime(0.0001, ctx.currentTime + start);
+      noteGain.gain.exponentialRampToValueAtTime(0.9, ctx.currentTime + start + 0.02);
+      noteGain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + start + 0.28);
+      osc.connect(noteGain);
+      noteGain.connect(gain);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + 0.3);
+    });
+  } catch {
+    /* audio blocked */
+  }
+}
+
+function gameYourTurn(game) {
+  if (!game) return false;
+  if (game.type === "tictactoe" || game.type === "checkers" || game.type === "connect4" || game.type === "memory" || game.type === "hangman") {
+    return !!game.yourTurn && !game.winner;
+  }
+  if (game.type === "kahoot") return !!game.yourTurn;
+  return false;
+}
+
+function gameStateSig(game) {
+  if (!game) return "";
+  if (game.type === "kahoot") return `${game.version}:${game.phase}:${game.current}:${game.answered}:${game.reveal ? 1 : 0}`;
+  return `${game.type}:${game.version}:${game.winner || ""}:${game.yourTurn ? 1 : 0}`;
+}
+
+function gameTypeLabel(type) {
+  const map = {
+    tictactoe: "Tic-tac-toe", checkers: "Checkers", solitaire: "Solitaire", kahoot: "Kahoot",
+    connect4: "Connect Four", memory: "Memory Match", hangman: "Hangman",
+  };
+  return map[type] || "your game";
+}
+
+function checkTurnNotify(game) {
+  if (!game) return;
+  const mine = gameYourTurn(game);
+  if (S.turnHadMine === undefined) {
+    S.turnHadMine = mine;
+    S.gameWinnerWas = game.winner || null;
+    return;
+  }
+  if (mine && !S.turnHadMine) {
+    playTurnRing();
+    if (S.route !== "games" || S.gameType !== game.type) {
+      showFlash(`Your turn in ${gameTypeLabel(game.type)}.`);
+    }
+  }
+  if (game.winner && game.winner !== S.gameWinnerWas && game.type !== "solitaire" && typeof BuzzMotion !== "undefined") {
+    BuzzMotion.confetti();
+  }
+  S.gameWinnerWas = game.winner || null;
+  S.turnHadMine = mine;
+}
+
+function momentReactSig(moments) {
+  return (moments || []).map((m) => `${m.id}:${JSON.stringify(m.reactionCounts || {})}`).join("|");
+}
+
+async function pullPresence() {
+  if (!S.bubble || S.bubble.status !== "active") return;
+  try {
+    const data = await api("presence");
+    const was = S.partnerOnlineWas;
+    S.presence = { partnerOnline: !!data.partnerOnline, partnerTyping: !!data.partnerTyping };
+    if (data.partnerOnline && !was && typeof BuzzMotion !== "undefined") BuzzMotion.partnerOnlineGlow();
+    S.partnerOnlineWas = !!data.partnerOnline;
+    paintPartnerStatus();
+    const chip = document.querySelector(".you-chip");
+    if (chip) chip.classList.toggle("partner-here", !!data.partnerOnline);
+  } catch {
+    /* ignore */
+  }
+}
+
+function pingTyping() {
+  if (!S.bubble || S.bubble.status !== "active") return;
+  if (typeof BuzzMotion !== "undefined") {
+    BuzzMotion.scheduleTypingPing(() => {
+      api("presence", { method: "POST", json: { typing: true } }).catch(() => {});
+    });
+  }
+}
+
+function gameCommentsHtml() {
+  if (!S.gameComments.length) {
+    return `<p class="empty">Cheer them on — the thread's quiet.</p>`;
+  }
+  return S.gameComments.map((comment) => {
+    const mine = comment.senderId === S.user.id;
+    return `<div class="watch-msg ${mine ? "mine" : "theirs"}"><strong>${esc(whoName(comment.senderId))}</strong>${formatChatBody(comment.body)}<time>${esc(clock(comment.createdAt))}</time></div>`;
+  }).join("");
+}
+
+function gameChatAside() {
+  return `<aside class="game-chat card">
+    <h3>Game chat</h3>
+    <p class="empty">Banter for this match only.</p>
+    <div id="game-msgs" class="watch-msgs">${gameCommentsHtml()}</div>
+    ${chatComposerHtml("game-chat", { max: 280, placeholder: "Cheer, tease, or gloat…", extraClass: "watch-composer" })}
+  </aside>`;
+}
+
+function partnerName() {
+  return S.bubble?.partner?.displayName || "your person";
+}
+
+function initial(name) {
+  return esc(String(name || "?").trim().charAt(0).toUpperCase() || "?");
+}
+
+function ava(name, cls = "") {
+  return `<span class="ava ${cls}">${initial(name)}</span>`;
+}
+
+function whoName(id) {
+  if (S.user && id === S.user.id) return "You";
+  return partnerName();
+}
+
+function togetherLabel(iso) {
+  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+  if (days <= 0) return "Day one together";
+  if (days === 1) return "1 day together";
+  return `${days} days together`;
+}
+
+function daysTogetherLabel(bubble) {
+  const days = bubble?.daysTogether;
+  if (typeof days === "number") {
+    if (days <= 0) return "Day one together";
+    if (days === 1) return "1 day together";
+    return `${days} days together`;
+  }
+  return togetherLabel(bubble?.createdAt || new Date().toISOString());
+}
+
+function visitCountdownLabel(iso) {
+  if (!iso) return "";
+  const target = new Date(`${iso}T12:00:00`);
+  const days = Math.ceil((target.getTime() - Date.now()) / 86400000);
+  if (days < 0) return "Visit time — soak it in";
+  if (days === 0) return "Together today";
+  if (days === 1) return "1 day until you're together";
+  return `${days} days until you're together`;
+}
+
+function partnerStatusHtml() {
+  const online = S.presence?.partnerOnline;
+  const typing = S.presence?.partnerTyping && S.route === "chat";
+  let label = online ? "Here with you" : "Away for now";
+  if (typing) label = "Typing something sweet…";
+  return `<p id="partner-status" class="partner-status ${online ? "online" : ""} ${typing ? "typing" : ""}"><span class="status-dot" aria-hidden="true"></span>${esc(label)}</p>`;
+}
+
+function intimacyBarHtml() {
+  if (!S.bubble || S.bubble.status !== "active") return "";
+  const visit = visitCountdownLabel(S.bubble.nextVisitAt);
+  return `<div class="intimacy-bar glass">
+    <div class="intimacy-stat"><span class="label">Together</span><strong>${esc(daysTogetherLabel(S.bubble))}</strong></div>
+    ${visit ? `<div class="intimacy-stat"><span class="label">Next visit</span><strong>${esc(visit)}</strong></div>` : `<div class="intimacy-stat"><span class="label">Next visit</span><strong class="empty">Set a date below</strong></div>`}
+    <button class="btn rose" type="button" data-act="thinking">Thinking of you</button>
+    <form data-form="visit" class="visit-form row">
+      <input type="date" name="nextVisit" value="${esc(S.bubble.nextVisitAt || "")}" aria-label="Next visit">
+      <button class="btn ghost" type="submit">Save</button>
+    </form>
+  </div>`;
+}
+
+function paintPartnerStatus() {
+  const el = document.getElementById("partner-status");
+  if (!el) return;
+  const online = S.presence?.partnerOnline;
+  const typing = S.presence?.partnerTyping && S.route === "chat";
+  let label = online ? "Here with you" : "Away for now";
+  if (typing) label = "Typing something sweet…";
+  el.className = `partner-status ${online ? "online" : ""} ${typing ? "typing" : ""}`;
+  el.innerHTML = `<span class="status-dot" aria-hidden="true"></span>${esc(label)}`;
+}
+
+function clock(iso) {
+  return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+function dayLabel(iso) {
+  const date = new Date(iso);
+  const today = new Date();
+  if (date.toDateString() === today.toDateString()) return "Today";
+  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function mark() {
+  return `<svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><circle cx="20" cy="24" r="12" fill="#ffd0c6"/><circle cx="30" cy="24" r="12" fill="none" stroke="#e25b45" stroke-width="2.5"/></svg>`;
+}
+
+function icon(name) {
+  const paths = {
+    home: '<path d="M4 11 12 4l8 7v9a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/>',
+    chat: '<path d="M5 6h14v9H8l-3 3z"/>',
+    note: '<path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M9 12h6M9 16h4"/>',
+    photo: '<rect x="4" y="5" width="16" height="14" rx="2"/><circle cx="9" cy="10" r="1.4"/><path d="m4 16 4.5-4 3 3L15 11l5 5"/>',
+    play: '<circle cx="12" cy="12" r="8"/><path d="m10 9 6 3-6 3z"/>',
+    grid: '<path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"/>',
+    video: '<rect x="3" y="7" width="12" height="10" rx="2"/><path d="m15 10 6-3v10l-6-3z"/>',
+    user: '<circle cx="12" cy="9" r="3"/><path d="M6 19c1.5-3 3.5-4 6-4s4.5 1 6 4"/>',
+    look: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M18.4 5.6 17 7M7 17l-1.4 1.4"/>',
+    more: '<circle cx="6" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="18" cy="12" r="1.3"/>',
+    bubbles: '<circle cx="9" cy="12" r="5"/><circle cx="16" cy="12" r="5"/>',
+  };
+  return `<svg class="ico" viewBox="0 0 24 24" aria-hidden="true">${paths[name] || ""}</svg>`;
+}
+
+function errorHtml() {
+  return `<p class="error" data-error ${S.error ? "" : "hidden"}>${esc(S.error)}</p>`;
+}
+
+function flashHtml() {
+  return `<p class="flash" data-flash ${S.flash ? "" : "hidden"}>${esc(S.flash)}</p>`;
+}
+
+function showError(message) {
+  S.error = message || "";
+  const el = document.querySelector("[data-error]");
+  if (!el) {
+    if (message) render();
+    return;
+  }
+  el.hidden = !message;
+  el.textContent = message || "";
+}
+
+function showFlash(message) {
+  S.flash = message || "";
+  const el = document.querySelector("[data-flash]");
+  if (!el) return;
+  el.hidden = !message;
+  el.textContent = message || "";
+  if (message && effectsOn()) {
+    el.classList.remove("flash-pop");
+    void el.offsetWidth;
+    el.classList.add("flash-pop");
+  }
+}
+
+function motionEnabled() {
+  return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function syncMotionBody() {
+  const brand = !S.user || S.route === "landing" || S.route === "auth";
+  const inside = !!(S.user && S.bubble && S.bubble.status === "active");
+  document.body.classList.toggle("brand-shell", brand);
+  document.body.classList.toggle("in-bubble", inside);
+  document.body.classList.toggle("fx-off", !animationsEnabled());
+  document.body.classList.add("app-ready");
+  if (inside && S.bubble?.ambienceHue != null) {
+    document.body.style.setProperty("--ambience-hue", String(S.bubble.ambienceHue));
+  } else {
+    document.body.style.removeProperty("--ambience-hue");
+  }
+}
+
+function runScreenEnter() {
+  if (!effectsOn()) return;
+  const screen = document.getElementById("screen");
+  const landing = document.querySelector(".landing");
+  const target = screen || landing;
+  if (!target) return;
+  target.classList.remove("screen-enter");
+  void target.offsetWidth;
+  target.classList.add("screen-enter");
+}
+
+function paintView(html) {
+  const host = document.getElementById("view-root") || document.getElementById("app");
+  const apply = () => {
+    host.innerHTML = html;
+    syncMotionBody();
+    afterRender();
+    runScreenEnter();
+  };
+  if (effectsOn() && typeof document.startViewTransition === "function") {
+    document.startViewTransition(apply);
+    return;
+  }
+  apply();
+}
+
+async function api(action, { method = "GET", json = null, body = null, query = null, bubbleId = null } = {}) {
+  const params = new URLSearchParams({ action });
+  if (query) {
+    Object.entries(query).forEach(([key, value]) => params.set(key, value));
+  }
+  const opts = { method, headers: {}, credentials: "same-origin" };
+  const chosenBubble = bubbleId || S.bubble?.id;
+  if (chosenBubble) opts.headers["X-Bubble-Id"] = String(chosenBubble);
+  if (method !== "GET") opts.headers["X-BuzzBuds"] = "1";
+  if (json !== null) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(json);
+  } else if (body) {
+    opts.body = body;
+  }
+  let res;
+  try {
+    res = await fetch("api.php?" + params.toString(), opts);
+  } catch {
+    const err = new Error("Cannot reach BuzzBuds. Check that the site is running.");
+    err.status = 0;
+    throw err;
+  }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data || data.ok === false) {
+    if (res.status === 401 && !["login", "register", "state"].includes(action)) {
+      S.user = null;
+      S.bubble = null;
+      S.bubbles = [];
+      S.bubbleId = 0;
+      S.stateReady = false;
+      if (S.route !== "auth" && S.route !== "landing") {
+        S.renderedRoute = null;
+        queueMicrotask(() => go("auth", { force: true }));
+      }
+    }
+    const err = new Error((data && data.error) || "Something went wrong.");
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+const PRESETS = {
+  ember: {
+    label: "Ember",
+    light: { bg: "#faf3ee", ink: "#2a1520", muted: "#8a6f78", line: "#f0dde6", accent: "#e85d6f", deep: "#c43d58", card: "#fff9f6", wash: "#ffd4c4" },
+    dark: { bg: "#1a0f22", ink: "#fff5f8", muted: "#cbb8c4", line: "#3d2848", accent: "#ff7a8f", deep: "#ffb8c8", card: "#2a1834", wash: "#3a1e42" },
+  },
+  harbor: {
+    label: "Harbor",
+    light: { bg: "#e7f1f4", ink: "#10242c", muted: "#4d6872", line: "#d3e4ea", accent: "#1f7a8c", deep: "#145866", card: "#f7fbfc", wash: "#d4eef4" },
+    dark: { bg: "#0e1c22", ink: "#eef7f8", muted: "#9db8c0", line: "#2a4450", accent: "#3ec1d3", deep: "#8ee4ef", card: "#17303a", wash: "#143038" },
+  },
+  moss: {
+    label: "Moss",
+    light: { bg: "#eef3e6", ink: "#1c2614", muted: "#5d6b52", line: "#dbe6d0", accent: "#4f7c3a", deep: "#345628", card: "#fbfdf7", wash: "#e0f0d0" },
+    dark: { bg: "#141c12", ink: "#f4f8ef", muted: "#b7c6ac", line: "#31442a", accent: "#8fbf6a", deep: "#c6e6a8", card: "#243222", wash: "#1c2a18" },
+  },
+  dusk: {
+    label: "Dusk",
+    light: { bg: "#f3eaf6", ink: "#2a1830", muted: "#74607c", line: "#e6d7ee", accent: "#8b4d9b", deep: "#643672", card: "#fdf9ff", wash: "#f0dcf6" },
+    dark: { bg: "#1c1224", ink: "#fbf6ff", muted: "#cbb6d4", line: "#453055", accent: "#d39adf", deep: "#f0d0f4", card: "#2e2238", wash: "#2a1836" },
+  },
+  ink: {
+    label: "Ink",
+    light: { bg: "#f6f4f1", ink: "#161513", muted: "#5e5a55", line: "#e4e0da", accent: "#c4552a", deep: "#8d3918", card: "#ffffff", wash: "#f0e4dc" },
+    dark: { bg: "#111110", ink: "#f7f5f2", muted: "#b7b2ab", line: "#3a3834", accent: "#f0a07a", deep: "#ffd0b8", card: "#222220", wash: "#2a211c" },
+  },
+};
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+function rgbToHex(r, g, b) {
+  return "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+}
+
+function shade(hex, amount) {
+  const [r, g, b] = hexToRgb(hex);
+  return rgbToHex(r + amount, g + amount, b + amount);
+}
+
+function luminance(hex) {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function normalizeLook(raw) {
+  const data = raw && typeof raw === "object" ? raw : {};
+  const pick = (key, allowed, fallback) => (allowed.includes(data[key]) ? data[key] : fallback);
+  const hex = (key) => (/^#[0-9a-fA-F]{6}$/.test(data[key] || "") ? String(data[key]).toLowerCase() : "");
+  return {
+    preset: pick("preset", ["ember", "harbor", "moss", "dusk", "ink", "custom"], "ember"),
+    mode: pick("mode", ["light", "dark"], "light"),
+    accent: hex("accent"),
+    bg: hex("bg"),
+    density: pick("density", ["cozy", "compact"], "cozy"),
+    nav: pick("nav", ["side", "top"], "side"),
+    home: pick("home", ["grid", "stack"], "grid"),
+    corners: pick("corners", ["round", "soft", "sharp"], "round"),
+    span: pick("span", ["focus", "wide"], "focus"),
+    notes: pick("notes", ["tilted", "flat"], "tilted"),
+    animations: pick("animations", ["on", "off"], "on"),
+  };
+}
+
+function animationsEnabled() {
+  return currentLook().animations !== "off";
+}
+
+function effectsOn() {
+  return motionEnabled() && animationsEnabled();
+}
+
+function currentLook() {
+  return normalizeLook(S.user && S.user.appearance);
+}
+
+function tokensFor(look) {
+  if (look.preset === "custom") {
+    const bg = look.bg || (look.mode === "dark" ? "#1c1614" : "#f6f1ec");
+    const dark = luminance(bg) < 0.45;
+    const ink = dark ? "#f7f3ee" : "#1c1410";
+    const accent = look.accent || "#e25b45";
+    return {
+      "--bg": bg,
+      "--ink": ink,
+      "--ink-on-dark": ink,
+      "--muted": dark ? "#cbb8ae" : "#6d5c56",
+      "--line": dark ? shade(bg, 32) : shade(bg, -18),
+      "--rose": accent,
+      "--rose-deep": shade(accent, dark ? 40 : -28),
+      "--card": dark ? shade(bg, 20) : shade(bg, 16),
+      "--wash": dark ? shade(bg, 12) : shade(accent, 150),
+      "--shadow": dark ? "0 16px 40px rgba(0,0,0,0.35)" : "0 16px 40px rgba(44, 24, 16, 0.08)",
+      dark,
+    };
+  }
+  const preset = PRESETS[look.preset] || PRESETS.ember;
+  const tone = preset[look.mode] || preset.light;
+  const accent = look.accent || tone.accent;
+  const deep = look.accent ? shade(accent, look.mode === "dark" ? 36 : -30) : tone.deep;
+  return {
+    "--bg": tone.bg,
+    "--ink": tone.ink,
+    "--ink-on-dark": tone.ink,
+    "--muted": tone.muted,
+    "--line": tone.line,
+    "--rose": accent,
+    "--rose-deep": deep,
+    "--card": tone.card,
+    "--wash": tone.wash,
+    "--shadow": look.mode === "dark" ? "0 16px 40px rgba(0,0,0,0.35)" : "0 16px 40px rgba(44, 24, 16, 0.08)",
+    dark: look.mode === "dark",
+  };
+}
+
+function applyLook() {
+  const root = document.documentElement;
+  const props = ["--bg", "--ink", "--muted", "--line", "--rose", "--rose-deep", "--card", "--wash", "--bg-deep", "--ink-on-dark", "--shadow"];
+  const brand = !S.user || S.route === "landing" || S.route === "auth";
+  const theme = document.querySelector('meta[name="theme-color"]');
+  if (brand) {
+    props.forEach((key) => root.style.removeProperty(key));
+    ["density", "nav", "home", "corners", "span", "notes"].forEach((key) => delete root.dataset[key]);
+    document.body.className = "theme-dark";
+    if (theme) theme.content = "#241610";
+    return;
+  }
+  const look = currentLook();
+  const tokens = tokensFor(look);
+  props.forEach((key) => {
+    if (key === "--bg-deep") return;
+    root.style.setProperty(key, tokens[key]);
+  });
+  if (tokens.dark) root.style.setProperty("--bg-deep", tokens["--bg"]);
+  else root.style.removeProperty("--bg-deep");
+  root.dataset.density = look.density;
+  root.dataset.nav = look.nav;
+  root.dataset.home = look.home;
+  root.dataset.corners = look.corners;
+  root.dataset.span = look.span;
+  root.dataset.notes = look.notes;
+  document.body.className = tokens.dark ? "theme-dark" : "theme-light";
+  if (theme) theme.content = tokens["--bg"];
+}
+
+function paintLook() {
+  const look = currentLook();
+  const tokens = tokensFor(look);
+  document.querySelectorAll("[data-act='look']").forEach((btn) => {
+    btn.classList.toggle("on", look[btn.dataset.key] === btn.dataset.value);
+  });
+  document.querySelectorAll("[data-look-color]").forEach((input) => {
+    if (document.activeElement === input) return;
+    if (input.dataset.lookColor === "accent") input.value = look.accent || tokens["--rose"];
+    if (input.dataset.lookColor === "bg") input.value = look.bg || tokens["--bg"];
+  });
+}
+
+let lookQueue = null;
+let lookSaving = false;
+let lookFlight = 0;
+
+async function saveLook(patch) {
+  lookQueue = normalizeLook({ ...(lookQueue || currentLook()), ...patch });
+  S.user = { ...S.user, appearance: lookQueue };
+  applyLook();
+  paintLook();
+  if (lookSaving) return;
+  lookSaving = true;
+  lookFlight++;
+  try {
+    while (lookQueue) {
+      const next = lookQueue;
+      lookQueue = null;
+      const data = await api("profile", { method: "POST", json: { appearance: next } });
+      if (!lookQueue) {
+        S.user = data.user;
+        applyLook();
+        paintLook();
+      }
+    }
+  } catch (err) {
+    showError(err.message || "Could not save that look.");
+  } finally {
+    lookSaving = false;
+    lookFlight--;
+  }
+}
+
+function guard(route) {
+  if (route === "pair") route = "bubbles";
+  const known = [
+    "landing", "auth", "bubbles", "home", "chat", "notes", "moments", "watch", "games", "call", "profile", "look", "more",
+    "daily", "mood", "timeline", "playlist", "draw", "wyr", "bucket", "calendar", "favorites",
+    "quiz", "scrapbook", "jar", "search",
+  ];
+  if (!known.includes(route)) route = S.user ? "bubbles" : "landing";
+  if (!S.user) return route === "auth" ? "auth" : "landing";
+  const inside = S.bubble && S.bubble.status === "active";
+  if (!inside && !["bubbles", "profile", "look"].includes(route)) return "bubbles";
+  if (inside && ["landing", "auth"].includes(route)) return "home";
+  return route;
+}
+
+function rememberBubble(id) {
+  S.bubbleId = id || 0;
+  if (S.bubbleId) sessionStorage.setItem("buzz-bubble", String(S.bubbleId));
+  else sessionStorage.removeItem("buzz-bubble");
+}
+
+async function refreshState() {
+  const data = await api("state", { query: S.bubbleId ? { bubble: S.bubbleId } : null });
+  const pendingLook = lookFlight > 0 && S.user ? S.user.appearance : null;
+  S.user = data.user;
+  if (pendingLook && S.user) S.user.appearance = pendingLook;
+  S.bubbles = data.bubbles || [];
+  S.bubble = data.bubble;
+  S.preview = data.preview;
+  if (S.user) rememberBubble(data.bubble?.id || 0);
+  if (data.serverNow) S.clockOffset = data.serverNow - Date.now() / 1000;
+  S.badges = data.badges || { bubbles: 0, chat: 0, notes: 0, moments: 0, watch: 0, games: 0 };
+  paintBadges();
+  const editing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.lookColor;
+  if (!editing) applyLook();
+}
+
+function badgeCount(route) {
+  const b = S.badges || {};
+  if (route === "bubbles") return b.bubbles || 0;
+  if (route === "chat") return b.chat || 0;
+  if (route === "notes") return b.notes || 0;
+  if (route === "moments") return b.moments || 0;
+  if (route === "watch") return b.watch || 0;
+  if (route === "games") return b.games || 0;
+  if (route === "more") return (b.games || 0) + (b.moments || 0) + (b.watch || 0);
+  return 0;
+}
+
+function paintBadges() {
+  const prev = S.badgePrev || {};
+  document.querySelectorAll("[data-badge-route]").forEach((el) => {
+    const route = el.dataset.badgeRoute;
+    const count = badgeCount(route);
+    const before = prev[route] || 0;
+    let badge = el.querySelector(".nav-badge");
+    if (!count) {
+      if (badge && before > 0) {
+        badge.classList.add("badge-fade");
+        window.setTimeout(() => badge.remove(), 480);
+      } else {
+        badge?.remove();
+      }
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "nav-badge";
+      el.appendChild(badge);
+    }
+    badge.textContent = count > 9 ? "9+" : String(count);
+    if (count > before) {
+      badge.classList.remove("badge-bump");
+      void badge.offsetWidth;
+      badge.classList.add("badge-bump");
+    }
+  });
+  S.badgePrev = {
+    bubbles: badgeCount("bubbles"),
+    chat: badgeCount("chat"),
+    notes: badgeCount("notes"),
+    moments: badgeCount("moments"),
+    watch: badgeCount("watch"),
+    games: badgeCount("games"),
+    more: badgeCount("more"),
+  };
+}
+
+const BADGE_NAV_ROUTES = new Set(["bubbles", "chat", "notes", "moments", "watch", "games"]);
+
+function navButtonHtml(route, label, ic) {
+  const badgeAttr = BADGE_NAV_ROUTES.has(route) ? ` data-badge-route="${route}"` : "";
+  return `<button class="nav-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${badgeAttr}>${icon(ic)}<span class="nav-label">${label}</span></button>`;
+}
+
+function tabButtonHtml(route, label, ic) {
+  const badgeRoute = route === "bubbles" || route === "chat" || route === "notes" || route === "more" ? route : "";
+  const badgeAttr = badgeRoute ? ` data-badge-route="${badgeRoute}"` : "";
+  return `<button class="tab-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${badgeAttr}>${icon(ic)}<span>${label}</span></button>`;
+}
+
+async function markSectionSeen(section) {
+  if (!S.bubble || S.bubble.status !== "active") return;
+  const action = `${section}_seen`;
+  if (!["notes", "chat", "moments", "watch"].includes(section)) return;
+  try {
+    const data = await api(action, { method: "POST", json: {} });
+    if (data.badges) S.badges = data.badges;
+    paintBadges();
+  } catch {
+    /* ignore */
+  }
+}
+
+function bubblesSig() {
+  return (S.bubbles || []).map((bubble) => `${bubble.id}:${bubble.status}:${bubble.snippet || ""}:${bubble.nextVisitAt || ""}:${bubble.daysTogether || 0}`).join("|");
+}
+
+async function go(route, opts = {}) {
+  if (S.navLock) return;
+  let next = guard(route);
+  if (!opts.force && S.renderedRoute === next) {
+    if (location.hash !== "#" + next) location.hash = next;
+    return;
+  }
+  S.navLock = true;
+  document.body.classList.add("is-navigating");
+  try {
+  if (S.user && !S.stateReady) {
+    try {
+      await refreshState();
+      S.stateReady = true;
+    } catch (err) {
+      S.error = err.message || "Something went wrong.";
+    }
+  }
+  next = guard(route);
+  S.route = next;
+  S.askLeave = false;
+  if (!opts.keepError) S.error = "";
+  S.flash = opts.keepFlash ? S.flash : "";
+  try {
+    if (S.user && ["home", "bubbles", "profile"].includes(next)) await refreshState();
+    if (S.route !== next) {
+      /* refresh can reveal a bubble and the caller may redirect after */
+    }
+    const guarded = guard(S.route);
+    S.route = guarded;
+    if (S.route === "chat") S.chat = (await api("messages")).messages;
+    if (S.route === "notes") {
+      S.notes = (await api("notes")).notes;
+      S.notesSig = S.notes.map((note) => note.id).join(",");
+    }
+    if (S.route === "moments") {
+      S.moments = (await api("moments")).moments;
+      S.momentsSig = S.moments.map((moment) => moment.id).join(",");
+      S.momentsReactSig = momentReactSig(S.moments);
+    }
+    if (S.route === "games" && S.gameType) {
+      S.game = (await api("game", { query: { type: S.gameType } })).game;
+      S.selected = S.game.mustFrom || null;
+    }
+    if (S.route === "watch") {
+      const data = await api("watch");
+      S.watch = data.watch;
+      S.clockOffset = data.serverNow - Date.now() / 1000;
+    }
+    if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
+      await ensureActivityRoute(S.route);
+    }
+  } catch (err) {
+    S.error = err.message || "Something went wrong.";
+    if (!S.user) S.route = "landing";
+  }
+  if (location.hash !== "#" + S.route) location.hash = S.route;
+  S.renderedRoute = S.route;
+  render();
+  } finally {
+    S.navLock = false;
+    document.body.classList.remove("is-navigating");
+  }
+}
+
+function navClass(route) {
+  if (route === "more") return ["watch", "games", "call", "profile", "look", "more"].includes(S.route) ? "on" : "";
+  return S.route === route ? "on" : "";
+}
+
+function landingScreen() {
+  const features = [
+    ["A bubble per person", "Each pair gets a private space. Chats, notes, and calls never mix."],
+    ["Notes and photos", "Leave a note on the board or drop a moment they can open later."],
+    ["Chat", "A quiet thread that belongs only to the two of you."],
+    ["Watch together", "Paste a YouTube link and stay roughly in step."],
+    ["Two games", "Tic-tac-toe when you want a minute. Checkers when you want a match."],
+    ["Video calls", "See each other from the same bubble, in the browser."],
+  ];
+  return `<div class="landing">
+    <header class="land-bar">
+      <div class="brand">${mark()}<span>BuzzBuds</span></div>
+      <button class="btn ghost" type="button" data-act="go" data-route="auth" data-mode="login">Sign in</button>
+    </header>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">For two, across any distance</p>
+        <h1>A private bubble for the two of you.</h1>
+        <p class="lede">Chat, leave notes, share photos, watch something together, play a game, or hop on a video call. Start a separate bubble with each person. Nothing crosses between them.</p>
+        <div class="hero-actions">
+          <button class="btn rose" type="button" data-act="go" data-route="auth" data-mode="register">Create your bubble</button>
+          <button class="btn ghost" type="button" data-act="go" data-route="auth" data-mode="login">I already have one</button>
+        </div>
+        ${S.bootError ? `<p class="error">${esc(S.bootError)}</p>` : ""}
+      </div>
+      <div class="phone" aria-hidden="true">
+        <div class="phone-top"><strong>You & yours</strong><span>today</span></div>
+        <div class="mini-note">Miss you. Left the lamp on.</div>
+        <div class="mini-row"><span class="on">X</span><span></span><span>O</span></div>
+      </div>
+    </section>
+    <section class="feature-grid">
+      ${features.map(([title, copy]) => `<article class="feature"><h3>${esc(title)}</h3><p>${esc(copy)}</p></article>`).join("")}
+    </section>
+  </div>`;
+}
+
+function authScreen() {
+  const register = S.authMode !== "login";
+  return `<div class="auth-wrap">
+    <button class="text-btn" type="button" data-act="go" data-route="landing" style="color:#fff8f3">Back</button>
+    <div class="auth-card">
+      <div class="brand">${mark()}<span>BuzzBuds</span></div>
+      <div class="tabs">
+        <button class="tab ${register ? "on" : ""}" type="button" data-act="auth-tab" data-mode="register">Create</button>
+        <button class="tab ${register ? "" : "on"}" type="button" data-act="auth-tab" data-mode="login">Sign in</button>
+      </div>
+      ${errorHtml()}
+      <form id="auth-form" data-form="${register ? "register" : "login"}" class="stack">
+        ${register ? `<div class="field"><label for="name">Your name</label><input id="name" name="name" maxlength="40" required autocomplete="name"></div>` : ""}
+        <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email"></div>
+        <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${register ? "new-password" : "current-password"}"></div>
+        <button class="btn rose" type="submit">${register ? "Get my username" : "Sign in"}</button>
+      </form>
+    </div>
+  </div>`;
+}
+
+function momentSrc(id) {
+  return `api.php?action=moment_image&id=${id}&bubble=${S.bubble?.id || 0}`;
+}
+
+function bubbleListHtml() {
+  const rows = S.bubbles || [];
+  if (!rows.length) return `<p class="empty">No bubbles yet — invite someone you miss.</p>`;
+  return rows.map((bubble) => {
+    const partner = bubble.partner;
+    if (bubble.status === "active") {
+      const snippet = bubble.snippet ? esc(bubble.snippet) : "Say the first hello";
+      const meta = esc(daysTogetherLabel(bubble));
+      const visit = bubble.nextVisitAt ? ` · ${esc(visitCountdownLabel(bubble.nextVisitAt))}` : "";
+      const current = bubble.id === S.bubble?.id ? " on" : "";
+      return `<button class="card bubble-row${current}" type="button" data-act="open-bubble" data-id="${bubble.id}">
+        ${ava(partner.displayName)}
+        <span class="grow"><strong>${esc(partner.displayName)}</strong><p class="bubble-meta">${meta}${visit}</p><p>@${esc(partner.username)} · ${snippet}</p></span>
+      </button>`;
+    }
+    if (bubble.incoming) {
+      return `<article class="card bubble-row">
+        ${ava(partner.displayName)}
+        <span class="grow"><strong>${esc(partner.displayName)} invited you</strong><p>@${esc(partner.username)}</p></span>
+        <button class="btn rose" type="button" data-act="accept" data-id="${bubble.id}">Accept</button>
+        <button class="btn ghost" type="button" data-act="decline" data-id="${bubble.id}">Not now</button>
+      </article>`;
+    }
+    return `<article class="card bubble-row">
+      ${ava(partner.displayName)}
+      <span class="grow"><strong>Waiting for ${esc(partner.displayName)}</strong><p>@${esc(partner.username)}</p></span>
+      <button class="btn ghost" type="button" data-act="cancel-invite" data-id="${bubble.id}">Cancel</button>
+    </article>`;
+  }).join("");
+}
+
+function bubblesScreen() {
+  const intro = S.bubble && S.bubble.status === "active"
+    ? `<p class="empty">Your username is @${esc(S.user.username)}. Each person below has a separate chat, notes, photos, and calls.</p>`
+    : `<p class="eyebrow">Your username</p>
+      <p class="username-xl">@${esc(S.user.username)}</p>
+      <div class="row"><button class="btn soft" type="button" data-act="copy-user">Copy</button></div>
+      <form data-form="username" class="username-form">
+        <input name="username" value="${esc(S.user.username)}" maxlength="20" aria-label="Change username" autocapitalize="none">
+        <button class="btn ghost" type="submit">Save</button>
+      </form>
+      <p>Start a bubble with each person. Their chat stays separate from everyone else.</p>`;
+  return `${errorHtml()}${flashHtml()}
+    <p class="eyebrow">Your bubbles</p>
+    <h2>People</h2>
+    ${intro}
+    <div id="bubble-list" class="stack">${bubbleListHtml()}</div>
+    <form data-form="invite" class="stack gap-top">
+      <div class="field"><label for="partner">Their username</label><input id="partner" name="username" autocapitalize="none" autocomplete="off" placeholder="honeybud24" required></div>
+      <button class="btn rose" type="submit">${(S.bubbles || []).length ? "Start another bubble" : "Start a bubble"}</button>
+    </form>`;
+}
+
+function quickActions() {
+  const items = [
+    ["chat", "Chat", "Say something"],
+    ["notes", "Notes", "Leave a note"],
+    ["moments", "Moments", "Share a photo"],
+    ["watch", "Watch", "A video together"],
+    ["games", "Play", "Board games and quizzes"],
+    ["call", "Call", "See each other"],
+  ];
+  return `<div class="quick">${items.map(([route, title, sub]) => `<button class="qbtn" type="button" data-act="go" data-route="${route}"><strong>${title}</strong><span>${sub}</span></button>`).join("")}</div>`;
+}
+
+function homeScreen() {
+  if (typeof BuzzActivities !== "undefined") return BuzzActivities.hubHome(S.badges);
+  return `${errorHtml()}${flashHtml()}<p class="empty">Loading hub…</p>`;
+}
+
+const ACTIVITY_KEYS = new Set(["daily", "mood", "timeline", "playlist", "draw", "wyr", "bucket", "quiz", "scrapbook", "jar"]);
+
+async function loadActivity(key) {
+  S.activityKey = key;
+  const data = await api("activity", { query: { key } });
+  S.activity = data.activity;
+  return S.activity;
+}
+
+async function activityAction(payload) {
+  if (!S.activityKey) return null;
+  if (!S.activity) await loadActivity(S.activityKey);
+  const data = await api("activity_action", {
+    method: "POST",
+    json: { key: S.activityKey, version: S.activity?.version ?? 0, ...payload },
+  });
+  S.activity = data.activity;
+  paintActivityScreen();
+  return S.activity;
+}
+
+function paintActivityScreen() {
+  const key = S.activityKey;
+  if (!key || typeof BuzzActivities === "undefined") return;
+  const root = document.getElementById("activity-root");
+  if (!root) return;
+  const fn = BuzzActivities.screens[key];
+  if (!fn) return;
+  const html = key === "timeline" ? fn(S.timelineFeed) : key === "calendar" || key === "favorites" ? fn(S.activity) : fn(S.activity);
+  const shell = root.closest(".activity-layout");
+  if (shell) {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = fn === BuzzActivities.screens.timeline ? BuzzActivities.screens.timeline(S.timelineFeed) : fn(S.activity);
+    const newMain = wrap.querySelector(".activity-main") || wrap.firstElementChild;
+    if (newMain && newMain.id === "activity-root") {
+      root.innerHTML = newMain.innerHTML;
+    } else {
+      root.innerHTML = wrap.innerHTML;
+    }
+  }
+  if (key === "draw") setupDrawCanvas();
+}
+
+async function ensureActivityRoute(route) {
+  if (!ACTIVITY_KEYS.has(route) && route !== "calendar" && route !== "favorites") return;
+  if (route === "timeline") {
+    S.timelineFeed = await api("timeline_feed");
+  }
+  const apiKey = route === "calendar" || route === "favorites" ? "hub" : route;
+  await loadActivity(apiKey);
+  S.activityKey = apiKey;
+  const comments = await api("activity_comments", { query: { key: apiKey } });
+  S.activityComments[apiKey] = comments.comments || [];
+}
+
+function activityScreen(route) {
+  const key = route === "calendar" || route === "favorites" ? "hub" : route;
+  if (typeof BuzzActivities === "undefined") return `${errorHtml()}<p class="empty">Loading…</p>`;
+  if (route === "timeline") return BuzzActivities.screens.timeline(S.timelineFeed || { items: [], onThisDay: [] });
+  if (route === "calendar") return BuzzActivities.screens.calendar(S.activity || {});
+  if (route === "favorites") return BuzzActivities.screens.favorites(S.activity || {});
+  const fn = BuzzActivities.screens[route];
+  return fn ? fn(S.activity || {}) : `${errorHtml()}<p class="empty">Coming soon.</p>`;
+}
+
+function paintActivityComments() {
+  const key = S.activityKey;
+  if (!key) return;
+  const list = document.getElementById("activity-msgs");
+  if (!list) return;
+  const comments = S.activityComments[key] || [];
+  list.innerHTML = comments.length
+    ? comments.map((c) => {
+        const mine = c.senderId === S.user.id;
+        return `<div class="watch-msg ${mine ? "mine" : "theirs"}"><strong>${esc(whoName(c.senderId))}</strong>${formatChatBody(c.body)}<time>${esc(clock(c.createdAt))}</time></div>`;
+      }).join("")
+    : `<p class="empty">Side chat for this activity.</p>`;
+  list.scrollTop = list.scrollHeight;
+}
+
+async function pullActivityComments() {
+  const key = S.activityKey;
+  if (!key || !ACTIVITY_KEYS.has(key) && key !== "hub") return;
+  const chatKey = key === "hub" ? S.route === "favorites" ? "hub" : "hub" : key;
+  const since = (S.activityComments[chatKey] || []).length ? S.activityComments[chatKey][S.activityComments[chatKey].length - 1].id : 0;
+  const data = await api("activity_comments", { query: { key: chatKey, since: since || undefined } });
+  if (!data.comments.length && since === 0) return;
+  if (since === 0) S.activityComments[chatKey] = data.comments;
+  else S.activityComments[chatKey].push(...data.comments);
+  paintActivityComments();
+}
+
+async function pullActivityState() {
+  const route = S.route;
+  if (!ACTIVITY_KEYS.has(route) && route !== "calendar" && route !== "favorites") return;
+  const key = route === "calendar" || route === "favorites" ? "hub" : route;
+  const prev = S.activity?.version;
+  const data = await api("activity", { query: { key } });
+  if (route === "timeline") {
+    const feed = await api("timeline_feed");
+    S.timelineFeed = feed;
+  }
+  S.activity = data.activity;
+  S.activityKey = key;
+  if (prev !== undefined && data.activity.version > prev) {
+    const root = document.getElementById("activity-root");
+    if (root && typeof BuzzActivities !== "undefined") {
+      const fn = route === "timeline" ? BuzzActivities.screens.timeline : BuzzActivities.screens[route] || BuzzActivities.screens[key];
+      if (fn) {
+        const full = route === "timeline" ? fn(S.timelineFeed) : fn(S.activity);
+        const tmp = document.createElement("div");
+        tmp.innerHTML = full;
+        const inner = tmp.querySelector("#activity-root");
+        if (inner) root.innerHTML = inner.innerHTML;
+      }
+    }
+    if (route === "draw") redrawDrawCanvas();
+  }
+  await pullActivityComments();
+}
+
+function redrawDrawCanvas() {
+  const canvas = document.getElementById("draw-canvas");
+  if (!canvas) return;
+  const ctx = canvas.getContext("2d");
+  const strokes = S.activity?.strokes || [];
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  strokes.forEach((stroke) => {
+    const pts = stroke.points || [];
+    if (pts.length < 2) return;
+    ctx.strokeStyle = stroke.color || "#e85d6f";
+    ctx.lineWidth = stroke.width || 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+      const x = p[0] * canvas.width;
+      const y = p[1] * canvas.height;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+}
+
+function setupDrawCanvas() {
+  const canvas = document.getElementById("draw-canvas");
+  if (!canvas) return;
+  redrawDrawCanvas();
+  if (canvas.dataset.bound) return;
+  canvas.dataset.bound = "1";
+  const drawAll = () => redrawDrawCanvas();
+  let drawing = false;
+  let points = [];
+  const norm = (e) => {
+    const r = canvas.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width;
+    const y = (e.clientY - r.top) / r.height;
+    return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
+  };
+  canvas.addEventListener("pointerdown", (e) => {
+    drawing = true;
+    points = [norm(e)];
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (!drawing) return;
+    points.push(norm(e));
+  });
+  canvas.addEventListener("pointerup", async () => {
+    if (!drawing || points.length < 2) {
+      drawing = false;
+      return;
+    }
+    drawing = false;
+    try {
+      await activityAction({ action: "stroke", stroke: { color: S.drawColor, width: 4, points } });
+      S.drawStrokes = S.activity?.strokes || [];
+      drawAll();
+    } catch (err) {
+      showError(err.message);
+    }
+    points = [];
+  });
+}
+
+async function markActivitySeen() {
+  const key = S.activityKey || (ACTIVITY_KEYS.has(S.route) ? S.route : null);
+  if (!key) return;
+  try {
+    const data = await api("activity_seen", { method: "POST", json: { key } });
+    if (data.badges) S.badges = data.badges;
+    paintBadges();
+  } catch {
+    /* ignore */
+  }
+}
+
+async function runDateNight() {
+  const picks = [
+    ["watch", "watch", "Queue a cozy watch"],
+    ["games", "games", "Play something quick"],
+    ["daily", "daily", "Answer today's question"],
+    ["wyr", "wyr", "Quick match game"],
+    ["draw", "draw", "Doodle together"],
+  ];
+  const [route, key, label] = picks[Math.floor(Math.random() * picks.length)];
+  showFlash(`Date night: ${label}`);
+  if (route === "games") {
+    await go("games", { force: true });
+    return;
+  }
+  await go(route, { force: true });
+  if (ACTIVITY_KEYS.has(route)) await ensureActivityRoute(route);
+}
+
+function msgsHtml(list) {
+  let html = "";
+  let lastDay = "";
+  list.forEach((message) => {
+    const day = dayLabel(message.createdAt);
+    if (day !== lastDay) {
+      html += `<div class="day">${esc(day)}</div>`;
+      lastDay = day;
+    }
+    const mine = message.senderId === S.user.id;
+    html += `<div class="msg ${mine ? "mine" : "theirs"}">${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}</time></div>`;
+  });
+  return html || `<p class="empty">Your chat is waiting — say something lovely.</p>`;
+}
+
+function appendChatMessage(message) {
+  const list = document.getElementById("msgs");
+  if (!list) return;
+  const empty = list.querySelector(".empty");
+  if (empty) empty.remove();
+  const mine = message.senderId === S.user.id;
+  const div = document.createElement("div");
+  div.className = `msg ${mine ? "mine" : "theirs"}${effectsOn() ? " msg-pop" : ""}`;
+  div.innerHTML = `${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}</time>`;
+  list.appendChild(div);
+}
+
+function chatScreen() {
+  return `${errorHtml()}
+    <p class="eyebrow">Chat</p>
+    <h2>${esc(partnerName())}</h2>
+    ${partnerStatusHtml()}
+    <div id="msgs" class="msgs">${msgsHtml(S.chat)}</div>
+    ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}`;
+}
+
+function notesHtml() {
+  if (!S.notes.length) return `<p class="empty">Nothing pinned yet — leave the first little love note.</p>`;
+  return S.notes.map((note) => `<article class="note" style="background:${NOTE_COLORS[note.color] || NOTE_COLORS.blush}">
+      <div class="who">${esc(whoName(note.authorId))} · ${esc(dayLabel(note.createdAt))}</div>
+      <p>${escBr(note.content)}</p>
+      ${note.authorId === S.user.id ? `<button class="text-btn" type="button" data-act="delete-note" data-id="${note.id}">Remove</button>` : ""}
+    </article>`).join("");
+}
+
+function notesScreen() {
+  const swatches = Object.entries(NOTE_COLORS).map(([name, hex]) => `<button class="swatch ${S.noteColor === name ? "on" : ""}" type="button" style="background:${hex}" data-act="swatch" data-color="${name}" aria-label="${name}"></button>`).join("");
+  return `${errorHtml()}${flashHtml()}
+    <p class="eyebrow">Notes</p>
+    <h2>Leave something behind</h2>
+    <form data-form="note" class="stack">
+      <textarea name="content" maxlength="500" placeholder="A thought, a reminder, a little I love you"></textarea>
+      <div class="swatches">${swatches}</div>
+      <button class="btn rose" type="submit">Pin note</button>
+    </form>
+    <div id="note-grid" class="note-grid gap-top">${notesHtml()}</div>`;
+}
+
+function momentReactionSummary(moment) {
+  const counts = moment.reactionCounts || {};
+  const parts = Object.entries(counts).filter(([, n]) => n > 0).map(([emoji, n]) => `${emoji} ${n}`);
+  return parts.length ? parts.join(" · ") : "";
+}
+
+function momentCommentsHtml(moment) {
+  const comments = S.momentComments[moment.id] || [];
+  if (!comments.length) return `<p class="empty">No comments yet.</p>`;
+  return comments.map((comment) => {
+    const mine = comment.senderId === S.user.id;
+    return `<div class="watch-msg ${mine ? "mine" : "theirs"}"><strong>${esc(whoName(comment.senderId))}</strong>${formatChatBody(comment.body)}<time>${esc(clock(comment.createdAt))}</time></div>`;
+  }).join("");
+}
+
+function momentCardHtml(moment) {
+  const open = S.momentOpen === moment.id;
+  const summary = momentReactionSummary(moment);
+  const reacts = MOMENT_REACTS.map((emoji) => {
+    const on = moment.myReaction === emoji ? "on" : "";
+    return `<button type="button" class="moment-react ${on}" data-act="moment-react" data-id="${moment.id}" data-emoji="${emoji}" aria-label="React ${emoji}">${emoji}</button>`;
+  }).join("");
+  const commentBtn = `<button class="text-btn moment-comment-toggle" type="button" data-act="moment-comments" data-id="${moment.id}">${moment.commentCount ? `${moment.commentCount} comment${moment.commentCount === 1 ? "" : "s"}` : "Comment"}</button>`;
+  const thread = open
+    ? `<div class="moment-thread">
+        <div class="moment-comment-list">${momentCommentsHtml(moment)}</div>
+        ${chatComposerHtml(`moment-comment-${moment.id}`, { max: 280, placeholder: "Add a comment…", extraClass: "watch-composer moment-composer" })}
+        <button class="text-btn" type="button" data-act="moment-comments" data-id="${moment.id}">Hide comments</button>
+      </div>`
+    : "";
+  return `<article class="polaroid">
+      <img alt="" src="${momentSrc(moment.id)}">
+      <p>${esc(moment.caption || "A moment")}</p>
+      <div class="who">${esc(whoName(moment.authorId))}</div>
+      <div class="moment-social">
+        <div class="moment-react-row">${reacts}</div>
+        ${summary ? `<p class="moment-react-summary">${esc(summary)}</p>` : ""}
+        ${commentBtn}
+      </div>
+      ${thread}
+      ${moment.authorId === S.user.id ? `<button class="text-btn" type="button" data-act="delete-moment" data-id="${moment.id}">Remove</button>` : ""}
+    </article>`;
+}
+
+function momentsHtml() {
+  if (!S.moments.length) return `<p class="empty">No moments yet — share a photo they'll smile at later.</p>`;
+  return S.moments.map((moment) => momentCardHtml(moment)).join("");
+}
+
+function paintMomentGrid() {
+  const grid = document.getElementById("moment-grid");
+  if (grid) grid.innerHTML = momentsHtml();
+  const openList = document.querySelector(".moment-comment-list");
+  if (openList) openList.scrollTop = openList.scrollHeight;
+}
+
+async function loadMomentComments(momentId) {
+  const data = await api("moment_comments", { query: { moment: momentId } });
+  S.momentComments[momentId] = data.comments || [];
+  paintMomentGrid();
+}
+
+async function momentReact(momentId, emoji) {
+  const moment = S.moments.find((row) => row.id === momentId);
+  if (!moment) return;
+  const next = moment.myReaction === emoji ? "" : emoji;
+  const data = await api("moment_react", { method: "POST", json: { momentId, emoji: next } });
+  moment.reactionCounts = data.reactionCounts || {};
+  moment.myReaction = data.myReaction || null;
+  moment.commentCount = data.commentCount ?? moment.commentCount;
+  paintMomentGrid();
+}
+
+function momentsScreen() {
+  return `${errorHtml()}${flashHtml()}
+    <p class="eyebrow">Moments</p>
+    <h2>Photos for later</h2>
+    <form data-form="moment" class="stack">
+      <input name="photo" type="file" accept="image/*" required>
+      <input name="caption" maxlength="300" placeholder="Caption (optional)">
+      <button class="btn rose" type="submit">Share</button>
+    </form>
+    <div id="moment-grid" class="moment-grid gap-top">${momentsHtml()}</div>`;
+}
+
+function gameStatus(game) {
+  if (game.type === "tictactoe") {
+    if (game.winner === "draw") return "Draw. A gentle tie.";
+    if (game.winner) return game.winner === game.youAre ? "You won." : `${partnerName()} won.`;
+    return game.yourTurn ? "Your turn." : `Waiting for ${partnerName()}.`;
+  }
+  if (game.type === "solitaire") {
+    if (game.you.won) return "You cleared the deck!";
+    const p = game.partner;
+    const partnerLine = p.won ? `${partnerName()} already won their board.` : `${partnerName()}: ${p.foundationCards} on foundations, ${p.stockLeft} cards left.`;
+    return partnerLine;
+  }
+  if (game.type === "kahoot") {
+    if (game.phase === "build") return game.youAreHost ? "You are hosting. Add questions, then start." : `Waiting for ${partnerName()} to start the quiz.`;
+    if (game.phase === "done") return "Quiz complete. Play again?";
+    if (game.phase === "reveal") return "Answers revealed.";
+    if (game.answered) return `Waiting for ${partnerName()}…`;
+    return "Pick an answer.";
+  }
+  if (game.winner) return game.winner === game.youAre ? "You won." : `${partnerName()} won.`;
+  if (game.mustFrom && game.yourTurn) return "Jump again.";
+  return game.yourTurn ? "Your turn." : `Waiting for ${partnerName()}.`;
+}
+
+const SOL_RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const SOL_SUITS = ["♠", "♥", "♦", "♣"];
+
+function solIsRed(card) {
+  const suit = Math.floor(card / 13);
+  return suit === 1 || suit === 2;
+}
+
+function solCardLabel(card) {
+  return `${SOL_RANKS[card % 13]}${SOL_SUITS[Math.floor(card / 13)]}`;
+}
+
+function solCardHtml(card, extra = "") {
+  const red = solIsRed(card);
+  return `<span class="sol-card ${red ? "red" : "black"} ${extra}">${esc(solCardLabel(card))}</span>`;
+}
+
+function solitaireInner(game) {
+  const you = game.you;
+  const wasteTop = you.waste.length ? you.waste[you.waste.length - 1] : null;
+  const foundations = you.foundations.map((pile, fi) => {
+    const top = pile.length ? pile[pile.length - 1] : null;
+    return `<button class="sol-pile foundation" type="button" data-act="sol-foundation" data-pile="${fi}">${top ? solCardHtml(top) : "<i class='sol-slot'>A</i>"}</button>`;
+  }).join("");
+  const tableau = you.tableau.map((col, pi) => {
+    const cards = col.map((cell, ci) => {
+      if (!cell.up) return `<span class="sol-card back"></span>`;
+      const sel = S.solSel && S.solSel.pile === pi && S.solSel.at === ci ? "sel" : "";
+      return `<button class="sol-card-btn ${sel}" type="button" data-act="sol-pick" data-pile="${pi}" data-at="${ci}">${solCardHtml(cell.c)}</button>`;
+    }).join("");
+    return `<button class="sol-col" type="button" data-act="sol-col" data-pile="${pi}">${cards || "<span class='sol-empty'></span>"}</button>`;
+  }).join("");
+  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
+    <h2>Solitaire</h2>
+    <p>${esc(gameStatus(game))}</p>
+    <p class="empty">Your own Klondike board. ${you.moves} moves.</p>
+    <div class="sol-board">
+      <div class="sol-top">
+        <button class="sol-pile stock" type="button" data-act="sol-draw" title="Draw"><span class="sol-stock">${you.stock ? you.stock : "↻"}</span></button>
+        <div class="sol-pile waste">${wasteTop ? solCardHtml(wasteTop) : "<span class='sol-slot'>—</span>"}</div>
+        <div class="sol-foundations">${foundations}</div>
+      </div>
+      <div class="sol-tableau">${tableau}</div>
+      <div class="row gap-top">
+        <button class="btn ghost" type="button" data-act="sol-waste-foundation" ${wasteTop ? "" : "disabled"}>Waste → foundation</button>
+      </div>
+    </div>
+    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">New deal</button></div>`;
+}
+
+function kahootScoresHtml(game) {
+  return game.scores.map((row) => {
+    const name = row.userId === S.user.id ? "You" : partnerName();
+    return `<span class="kahoot-score"><strong>${esc(name)}</strong> ${row.points}</span>`;
+  }).join(" · ");
+}
+
+function kahootInner(game) {
+  const scores = `<p class="kahoot-scores">${kahootScoresHtml(game)}</p>`;
+  if (game.phase === "build") {
+    const list = game.buildQuestions.map((q, i) => `<li><strong>${esc(q.prompt)}</strong><br><span class="empty">${esc(q.choices[q.correct])}</span></li>`).join("");
+    const packs = (game.packs || []).map((id) => `<button class="btn soft" type="button" data-act="kahoot-pack" data-pack="${id}">${esc(id)}</button>`).join(" ");
+    const host = game.youAreHost
+      ? `<form data-form="kahoot-add" class="stack">
+          <div class="field"><label>Question</label><input name="prompt" maxlength="220" required></div>
+          <div class="field"><label>Answer A</label><input name="c0" maxlength="90" required></div>
+          <div class="field"><label>Answer B</label><input name="c1" maxlength="90" required></div>
+          <div class="field"><label>Answer C</label><input name="c2" maxlength="90" required></div>
+          <div class="field"><label>Answer D</label><input name="c3" maxlength="90" required></div>
+          <div class="field"><label>Correct answer</label>
+            <select name="correct"><option value="0">A</option><option value="1">B</option><option value="2">C</option><option value="3">D</option></select>
+          </div>
+          <button class="btn rose" type="submit">Add question</button>
+        </form>
+        <div class="row gap-top">${packs}<button class="btn ghost" type="button" data-act="kahoot-clear">Clear</button></div>
+        <button class="btn rose gap-top" type="button" data-act="kahoot-start" ${game.questionCount ? "" : "disabled"}>Start quiz (${game.questionCount})</button>`
+      : `<p class="empty">The host is building the quiz. Hang tight.</p>`;
+    return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
+      <h2>Kahoot</h2>
+      <p>${esc(gameStatus(game))}</p>
+      ${scores}
+      <ol class="kahoot-list">${list || "<li class='empty'>No questions yet.</li>"}</ol>
+      ${host}
+      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Reset quiz</button></div>`;
+  }
+  if (game.phase === "done") {
+    return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
+      <h2>Kahoot</h2>
+      <p>${esc(gameStatus(game))}</p>
+      ${scores}
+      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Play again</button></div>`;
+  }
+  const q = game.currentQuestion;
+  const colors = ["kahoot-a", "kahoot-b", "kahoot-c", "kahoot-d"];
+  const choices = q ? q.choices.map((text, i) => {
+    const reveal = game.phase === "reveal";
+    const correct = reveal && q.correct === i;
+    const yours = game.yourChoice === i;
+    const disabled = game.phase !== "question" || game.answered;
+    return `<button class="kahoot-choice ${colors[i]} ${correct ? "correct" : ""} ${yours ? "yours" : ""}" type="button" data-act="kahoot-answer" data-choice="${i}" ${disabled ? "disabled" : ""}>${esc(text)}</button>`;
+  }).join("") : "";
+  let reveal = "";
+  if (game.phase === "reveal" && game.reveal) {
+    const pts = game.reveal.points[String(S.user.id)] || 0;
+    reveal = `<p class="flash">${pts ? `+${pts} points` : "No points this time."}</p>`;
+    if (game.youAreHost) reveal += `<button class="btn rose" type="button" data-act="kahoot-next">Next</button>`;
+  }
+  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
+    <h2>Kahoot</h2>
+    <p>${esc(gameStatus(game))}</p>
+    ${scores}
+    <p class="kahoot-q">${q ? esc(q.prompt) : ""}</p>
+    <p class="empty">Question ${game.current + 1} of ${game.questionCount}</p>
+    <div class="kahoot-grid">${choices}</div>
+    ${reveal}`;
+}
+
+function pieceHtml(piece) {
+  if (!piece) return "";
+  const side = piece === "r" || piece === "R" ? "red" : "black";
+  const king = piece === "R" || piece === "B" ? " king" : "";
+  return `<i class="piece ${side}${king}"></i>`;
+}
+
+function gameInner() {
+  const game = S.game;
+  if (!game) return "";
+  let board;
+  if (game.type === "solitaire") return solitaireInner(game);
+  if (game.type === "kahoot") return kahootInner(game);
+  if (game.type === "tictactoe") {
+    board = `<div class="ttt">${game.board.map((value, index) => {
+      const open = game.yourTurn && game.legal.includes(index);
+      const cls = value === "X" ? "x" : "";
+      return `<button class="cell ${cls}" type="button" data-act="ttt" data-i="${index}" ${open ? "" : "disabled"}>${esc(value || "")}</button>`;
+    }).join("")}</div>`;
+  } else if (game.type === "checkers") {
+    const rows = game.youAre === "red" ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
+    const cols = game.youAre === "red" ? [0, 1, 2, 3, 4, 5, 6, 7] : [7, 6, 5, 4, 3, 2, 1, 0];
+    const cells = [];
+    rows.forEach((row) => {
+      cols.forEach((col) => {
+        const play = (row + col) % 2 === 1;
+        if (!play) {
+          cells.push(`<div class="sq pale"></div>`);
+          return;
+        }
+        const selected = S.selected && S.selected[0] === row && S.selected[1] === col;
+        const last = game.lastMove && (
+          (game.lastMove.to[0] === row && game.lastMove.to[1] === col) ||
+          (game.lastMove.from[0] === row && game.lastMove.from[1] === col)
+        );
+        const dest = S.selected && (game.legal || []).some((move) => move.from[0] === S.selected[0] && move.from[1] === S.selected[1] && move.to[0] === row && move.to[1] === col);
+        cells.push(`<button class="sq play ${selected ? "sel" : ""} ${last ? "last" : ""}" type="button" data-act="pick" data-r="${row}" data-c="${col}">${pieceHtml(game.board[row][col])}${dest ? `<i class="dot"></i>` : ""}</button>`);
+      });
+    });
+    const side = game.youAre === "red" ? "You play coral." : "You play ink.";
+    board = `<p class="empty">${side} Jumps are required, and a second jump continues your turn.</p><div class="checkers">${cells.join("")}</div>`;
+  }
+  const title = game.type === "tictactoe" ? "Tic-tac-toe" : "Checkers";
+  const label = game.type === "tictactoe" ? `You are ${game.youAre}.` : "";
+  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
+    <h2>${title}</h2>
+    <p>${esc(gameStatus(game))} ${esc(label)}</p>
+    ${board}
+    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Play again</button></div>`;
+}
+
+function gamesScreen() {
+  if (!S.gameType || !S.game) {
+    return `${errorHtml()}
+      <p class="eyebrow">Games</p>
+      <h2>Pick a board</h2>
+      <div class="game-list">
+        <button class="game-card" type="button" data-act="play" data-type="tictactoe"><h3>Tic-tac-toe</h3><p>Three in a row. The person who opened the bubble goes first.</p></button>
+        <button class="game-card" type="button" data-act="play" data-type="checkers"><h3>Checkers</h3><p>Coral moves first. If you can jump, you have to. Kings wear a gold ring.</p></button>
+        <button class="game-card" type="button" data-act="play" data-type="solitaire"><h3>Solitaire</h3><p>Your own Klondike board in the bubble. Race to clear the deck.</p></button>
+        <button class="game-card" type="button" data-act="play" data-type="kahoot"><h3>Kahoot</h3><p>Build a quiz together, then answer in sync for points.</p></button>
+        <button class="game-card" type="button" data-act="go" data-route="daily"><h3>Daily question</h3><p>One question a day — answers unlock together.</p></button>
+        <button class="game-card" type="button" data-act="go" data-route="wyr"><h3>Would you rather</h3><p>Quick rounds to see if you match.</p></button>
+        <button class="game-card" type="button" data-act="go" data-route="mood"><h3>Mood check-in</h3><p>Share how you feel today.</p></button>
+      </div>`;
+  }
+  return `${errorHtml()}<div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>`;
+}
+
+function watchCommentsHtml() {
+  const vid = S.watch?.videoId;
+  if (!vid) {
+    return `<p class="empty">Start a video to open the side chat for that show.</p>`;
+  }
+  if (!S.watchComments.length) {
+    return `<p class="empty">No comments yet. React while you watch.</p>`;
+  }
+  return S.watchComments.map((comment) => {
+    const mine = comment.senderId === S.user.id;
+    return `<div class="watch-msg ${mine ? "mine" : "theirs"}"><strong>${esc(whoName(comment.senderId))}</strong>${formatChatBody(comment.body)}<time>${esc(clock(comment.createdAt))}</time></div>`;
+  }).join("");
+}
+
+function watchScreen() {
+  const vid = S.watch?.videoId;
+  return `${errorHtml()}${flashHtml()}
+    <p class="eyebrow">Watch together</p>
+    <h2>Press play for two</h2>
+    <p>Paste a YouTube link you both want to watch. Playback stays roughly in step. Comments on the right stay tied to this video.</p>
+    <div class="watch-layout">
+      <div class="watch-main">
+        <form data-form="watch" class="stack">
+          <input name="url" placeholder="https://www.youtube.com/watch?v=..." autocomplete="off">
+          <button class="btn rose" type="submit">Watch this</button>
+        </form>
+        <div class="player-frame"><div id="player"></div></div>
+      </div>
+      <aside class="watch-chat card">
+        <h3>Video chat</h3>
+        <p class="empty watch-chat-hint">${vid ? "Comments for this video only." : "Pick a video to chat here."}</p>
+        <div id="watch-msgs" class="watch-msgs">${watchCommentsHtml()}</div>
+        ${chatComposerHtml("watch-chat", { max: 280, placeholder: "Say something…", disabled: !vid, extraClass: "watch-composer" })}
+      </aside>
+    </div>`;
+}
+
+function callActionsHtml() {
+  if (!Call.active) return `<button class="btn rose" type="button" data-act="start-call">Start video call</button>`;
+  return `<button class="btn danger" type="button" data-act="hangup">Hang up</button>
+    <button class="btn ghost" type="button" data-act="mute">${S.micOff ? "Unmute" : "Mute"}</button>
+    <button class="btn ghost" type="button" data-act="camera">${S.camOff ? "Camera on" : "Camera off"}</button>`;
+}
+
+function callScreen() {
+  return `${errorHtml()}
+    <p class="eyebrow">Video call</p>
+    <h2>See ${esc(partnerName())}</h2>
+    <p>Stay on this page while you talk, with BuzzBuds open on both sides. Calls work well here on localhost. A public version later needs HTTPS.</p>
+    <div class="call-stage">
+      <video id="remote-video" class="remote" autoplay playsinline></video>
+      <video id="local-video" class="local" autoplay playsinline muted></video>
+    </div>
+    <p id="call-status">${esc(S.callStatus || "Camera stays off until you start.")}</p>
+    <div id="call-actions" class="call-actions">${callActionsHtml()}</div>`;
+}
+
+function moreScreen() {
+  return `<p class="eyebrow">More</p><h2>The rest of the bubble</h2>
+    <div class="game-list">
+      <button class="game-card" type="button" data-act="go" data-route="playlist"><h3>Playlist</h3><p>Shared songs and live reactions.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="draw"><h3>Drawing board</h3><p>Doodle together in real time.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="calendar"><h3>Calendar</h3><p>Dates, calls, and anniversaries.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="favorites"><h3>Favorites</h3><p>Jump to saved moments and notes.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="watch"><h3>Watch</h3><p>A YouTube video, in step.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="call"><h3>Video call</h3><p>See and hear each other.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="look"><h3>Look</h3><p>Theme, animations, and layout.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="profile"><h3>Profile</h3><p>Your name, username, and the door out.</p></button>
+    </div>`;
+}
+
+function profileScreen() {
+  const bubble = S.bubble && S.bubble.status === "active"
+    ? `<div class="card gap-top">
+        <h3>This bubble</h3>
+        <p>You and ${esc(partnerName())} (@${esc(S.bubble.partner.username)}). Leaving closes only this bubble.</p>
+        ${S.askLeave
+          ? `<button class="btn danger" type="button" data-act="leave">Yes, leave the bubble</button>`
+          : `<button class="btn danger" type="button" data-act="ask-leave">Leave bubble</button>`}
+      </div>`
+    : "";
+  return `${errorHtml()}${flashHtml()}
+    <p class="eyebrow">Profile</p>
+    <h2>${esc(S.user.displayName)}</h2>
+    <p class="empty">${esc(S.user.email)}</p>
+    <p><button class="text-btn" type="button" data-act="go" data-route="look">Theme and layout</button></p>
+    <form data-form="profile" class="stack">
+      <div class="field"><label for="displayName">Name</label><input id="displayName" name="displayName" maxlength="40" value="${esc(S.user.displayName)}" required></div>
+      <div class="field"><label for="username">Username</label><input id="username" name="username" maxlength="20" autocapitalize="none" value="${esc(S.user.username)}" required></div>
+      <button class="btn rose" type="submit">Save profile</button>
+    </form>
+    ${bubble}
+    <p class="gap-top"><button class="text-btn" type="button" data-act="logout">Sign out</button></p>`;
+}
+
+function choiceGroup(title, hint, key, options) {
+  const look = currentLook();
+  const buttons = options.map(([value, label]) => `<button class="choice ${look[key] === value ? "on" : ""}" type="button" data-act="look" data-key="${key}" data-value="${value}">${label}</button>`).join("");
+  return `<section class="look-block"><h3>${title}</h3><p class="empty">${hint}</p><div class="choice-grid">${buttons}</div></section>`;
+}
+
+function presetChoices() {
+  const look = currentLook();
+  const presets = Object.entries(PRESETS).map(([id, preset]) => {
+    const tone = preset.light;
+    return `<button class="choice ${look.preset === id ? "on" : ""}" type="button" data-act="look" data-key="preset" data-value="${id}"><span class="chip" style="background:linear-gradient(120deg, ${tone.bg} 0 42%, ${tone.accent} 42% 68%, ${tone.ink} 68%)"></span>${preset.label}</button>`;
+  }).join("");
+  const customBg = look.bg || "#f6f1ec";
+  const customAccent = look.accent || "#e25b45";
+  const custom = `<button class="choice ${look.preset === "custom" ? "on" : ""}" type="button" data-act="look" data-key="preset" data-value="custom"><span class="chip" style="background:linear-gradient(120deg, ${customBg} 0 55%, ${customAccent} 55%)"></span>Custom</button>`;
+  return `<section class="look-block"><h3>Theme</h3><p class="empty">Pick a palette. Custom uses the colors below.</p><div class="choice-grid">${presets}${custom}</div></section>`;
+}
+
+function lookScreen() {
+  const look = currentLook();
+  const tokens = tokensFor(look);
+  return `${errorHtml()}
+    <p class="eyebrow">Your look</p>
+    <h2>Theme and layout</h2>
+    <p>This stays on your account, in every bubble. Their screen keeps their own look.</p>
+    ${presetChoices()}
+    ${choiceGroup("Mode", "Light and dark recolor the palette you picked.", "mode", [["light", "Light"], ["dark", "Dark"]])}
+    <section class="look-block">
+      <h3>Colors</h3>
+      <p class="empty">Accent tints buttons and your messages. Background is used when Custom is selected.</p>
+      <div class="color-row">
+        <div class="field"><label for="look-accent">Accent</label><input id="look-accent" type="color" data-look-color="accent" value="${esc(look.accent || tokens["--rose"])}"></div>
+        <div class="field"><label for="look-bg">Background</label><input id="look-bg" type="color" data-look-color="bg" value="${esc(look.bg || tokens["--bg"])}"></div>
+        <button class="btn ghost" type="button" data-act="look" data-key="accent" data-value="none">Preset accent</button>
+      </div>
+    </section>
+    ${choiceGroup("Density", "How much room each screen takes.", "density", [["cozy", "Cozy"], ["compact", "Compact"]])}
+    ${choiceGroup("Navigation", "A side menu, or a bar across the top. Phones keep the bottom tabs.", "nav", [["side", "Side"], ["top", "Top"]])}
+    ${choiceGroup("Home", "The shortcuts on Home.", "home", [["grid", "Grid"], ["stack", "Stack"]])}
+    ${choiceGroup("Corners", "Round, softened, or square.", "corners", [["round", "Round"], ["soft", "Soft"], ["sharp", "Sharp"]])}
+    ${choiceGroup("Width", "A focused column, or more room on a wide screen.", "span", [["focus", "Focus"], ["wide", "Wide"]])}
+    ${choiceGroup("Notes", "A little tilt, or a straight board.", "notes", [["tilted", "Tilted"], ["flat", "Flat"]])}
+    ${choiceGroup("Animations", "Hearts, transitions, and little celebrations.", "animations", [["on", "On"], ["off", "Off"]])}`;
+}
+
+function screenFor(route) {
+  if (route === "search") return typeof BuzzActivities !== "undefined" ? BuzzActivities.screens.search(S.searchResults) : "";
+  if (ACTIVITY_KEYS.has(route) || route === "calendar" || route === "favorites") return activityScreen(route);
+  const map = {
+    home: homeScreen,
+    chat: chatScreen,
+    notes: notesScreen,
+    moments: momentsScreen,
+    watch: watchScreen,
+    games: gamesScreen,
+    call: callScreen,
+    profile: profileScreen,
+    look: lookScreen,
+    more: moreScreen,
+  };
+  return (map[route] || homeScreen)();
+}
+
+function simpleFrame(content) {
+  return `<div class="simple">
+    <header class="simple-bar">
+      <button class="brand text-btn" type="button" data-act="go" data-route="bubbles">${mark()}<span>BuzzBuds</span></button>
+      <div class="row">
+        <button class="text-btn" type="button" data-act="go" data-route="look">Look</button>
+        <button class="text-btn" type="button" data-act="go" data-route="profile">Profile</button>
+        <button class="text-btn" type="button" data-act="logout">Sign out</button>
+      </div>
+    </header>
+    <div id="screen">${content}</div>
+  </div>`;
+}
+
+function peopleNav() {
+  const active = (S.bubbles || []).filter((bubble) => bubble.status === "active");
+  return `<div class="people">${active.map((bubble) => `<button class="person ${bubble.id === S.bubble?.id ? "on" : ""}" type="button" data-act="open-bubble" data-id="${bubble.id}">${ava(bubble.partner.displayName)}<span>${esc(bubble.partner.displayName)}</span></button>`).join("")}
+    <button class="person add" type="button" data-act="go" data-route="bubbles"><span class="ava">+</span><span>New bubble</span></button></div>`;
+}
+
+function appShell(content) {
+  const items = [
+    ["bubbles", "Bubbles", "bubbles"],
+    ["home", "Home", "home"],
+    ["chat", "Chat", "chat"],
+    ["notes", "Notes", "note"],
+    ["moments", "Moments", "photo"],
+    ["watch", "Watch", "play"],
+    ["games", "Games", "grid"],
+    ["call", "Call", "video"],
+    ["look", "Look", "look"],
+    ["profile", "Profile", "user"],
+  ];
+  const tabs = [
+    ["bubbles", "Bubbles", "bubbles"],
+    ["home", "Home", "home"],
+    ["chat", "Chat", "chat"],
+    ["notes", "Notes", "note"],
+    ["more", "More", "more"],
+  ];
+  return `<div class="shell">
+    <aside class="sidebar">
+      <button class="brand text-btn" type="button" data-act="go" data-route="home">${mark()}<span>BuzzBuds</span></button>
+      ${peopleNav()}
+      <nav class="side-nav">
+        ${items.map(([route, label, ic]) => navButtonHtml(route, label, ic)).join("")}
+      </nav>
+      <div class="you-chip ${S.presence?.partnerOnline ? "partner-here" : ""}">${ava(partnerName())}<div><strong>${esc(partnerName())}</strong><small>@${esc(S.bubble.partner.username)}</small></div></div>
+    </aside>
+    <main class="main"><div id="screen">${content}</div></main>
+    <nav class="tabbar">
+      ${tabs.map(([route, label, ic]) => tabButtonHtml(route, label, ic)).join("")}
+    </nav>
+  </div>`;
+}
+
+function destroyPlayer() {
+  if (!S.player) return;
+  try {
+    if (typeof S.player.destroy === "function") S.player.destroy();
+  } catch {
+    /* iframe already gone */
+  }
+  S.player = null;
+}
+
+function render() {
+  destroyPlayer();
+  applyLook();
+  const titles = {
+    landing: "BuzzBuds",
+    auth: "Sign in · BuzzBuds",
+    bubbles: "Bubbles · BuzzBuds",
+    home: "Home · BuzzBuds",
+    chat: "Chat · BuzzBuds",
+    notes: "Notes · BuzzBuds",
+    moments: "Moments · BuzzBuds",
+    watch: "Watch · BuzzBuds",
+    games: "Games · BuzzBuds",
+    call: "Call · BuzzBuds",
+    profile: "Profile · BuzzBuds",
+    look: "Look · BuzzBuds",
+    more: "More · BuzzBuds",
+    daily: "Daily question · BuzzBuds",
+    mood: "Mood · BuzzBuds",
+    timeline: "Timeline · BuzzBuds",
+    playlist: "Playlist · BuzzBuds",
+    draw: "Draw · BuzzBuds",
+    wyr: "Quick match · BuzzBuds",
+    bucket: "Bucket list · BuzzBuds",
+    calendar: "Calendar · BuzzBuds",
+    favorites: "Favorites · BuzzBuds",
+    quiz: "Couple quiz · BuzzBuds",
+    scrapbook: "Scrapbook · BuzzBuds",
+    jar: "Love jar · BuzzBuds",
+    search: "Search · BuzzBuds",
+  };
+  document.title = titles[S.route] || "BuzzBuds";
+  let html;
+  const inside = S.bubble && S.bubble.status === "active";
+  if (!S.user) html = S.route === "auth" ? authScreen() : landingScreen();
+  else if (!inside) html = simpleFrame(S.route === "profile" ? profileScreen() : S.route === "look" ? lookScreen() : bubblesScreen());
+  else html = appShell(S.route === "bubbles" ? bubblesScreen() : screenFor(S.route));
+  paintView(html);
+}
+
+function afterRender() {
+  const list = document.getElementById("msgs");
+  if (list) list.scrollTop = list.scrollHeight;
+  const watchList = document.getElementById("watch-msgs");
+  if (watchList) watchList.scrollTop = watchList.scrollHeight;
+  if (S.route === "watch") {
+    setupWatch();
+    pullWatchComments().catch(() => {});
+  }
+  if (S.route === "games" && S.gameType) {
+    pullGameComments().catch(() => {});
+    const gameList = document.getElementById("game-msgs");
+    if (gameList) gameList.scrollTop = gameList.scrollHeight;
+  }
+  if (S.route === "call") attachCallMedia();
+  if (S.route === "notes") markSectionSeen("notes");
+  if (S.route === "chat") markSectionSeen("chat");
+  if (S.route === "moments") markSectionSeen("moments");
+  if (S.route === "watch") markSectionSeen("watch");
+  paintBadges();
+  const chatInput = document.querySelector('form[data-form="chat"] input[name="body"]');
+  if (chatInput && !chatInput.dataset.typingBound) {
+    chatInput.dataset.typingBound = "1";
+    chatInput.addEventListener("input", pingTyping);
+  }
+  pullPresence().catch(() => {});
+  if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
+    paintActivityComments();
+    if (S.route === "draw") setupDrawCanvas();
+    S.activityKey = S.route === "calendar" || S.route === "favorites" ? "hub" : S.route;
+    markActivitySeen();
+  }
+}
+
+async function tick() {
+  if (!S.user || S.ticking || S.navLock) return;
+  S.ticking = true;
+  try {
+    const before = bubblesSig();
+    const hadBubble = !!(S.bubble && S.bubble.status === "active");
+    await refreshState();
+    if (hadBubble && (!S.bubble || S.bubble.status !== "active") && !["bubbles", "profile"].includes(S.route)) {
+      await go("bubbles", { force: true });
+      return;
+    }
+    if (S.bubble && S.bubble.status === "active") {
+      if (S.route === "chat") await pullChat();
+      if (S.route === "notes") await pullNotes();
+      if (S.route === "moments") await pullMoments();
+      if (S.gameType) {
+        await pullGame();
+        if (S.route === "games") await pullGameComments();
+      }
+      if (S.route === "watch") {
+        await pullWatch();
+        await pullWatchComments();
+      }
+      if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
+        await pullActivityState();
+      }
+    }
+    await pullSignals();
+    await pullPresence();
+    if (bubblesSig() !== before) {
+      const list = document.getElementById("bubble-list");
+      if (list) list.innerHTML = bubbleListHtml();
+      const people = document.querySelector(".people");
+      if (people) people.outerHTML = peopleNav();
+    }
+  } catch {
+    /* keep the page usable if one poll fails */
+  } finally {
+    S.ticking = false;
+  }
+}
+
+async function pullChat() {
+  const since = S.chat.length ? S.chat[S.chat.length - 1].id : 0;
+  const data = await api("messages", { query: { since } });
+  if (!data.messages.length) return;
+  if (since === 0) S.chat = data.messages;
+  else S.chat.push(...data.messages);
+  const list = document.getElementById("msgs");
+  if (!list) return;
+  const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+  if (since === 0) {
+    list.innerHTML = msgsHtml(S.chat);
+  } else {
+    data.messages.forEach((message) => appendChatMessage(message));
+  }
+  if (stick) list.scrollTop = list.scrollHeight;
+}
+
+async function pullNotes() {
+  const data = await api("notes");
+  const sig = data.notes.map((note) => note.id).join(",");
+  if (sig === S.notesSig) return;
+  S.notes = data.notes;
+  S.notesSig = sig;
+  const grid = document.getElementById("note-grid");
+  if (grid) grid.innerHTML = notesHtml();
+}
+
+async function pullMoments() {
+  const data = await api("moments");
+  const sig = data.moments.map((moment) => `${moment.id}:${moment.commentCount}:${JSON.stringify(moment.reactionCounts)}:${moment.myReaction || ""}`).join("|");
+  const reactSig = momentReactSig(data.moments);
+  if (sig === S.momentsSig) return;
+  if (S.momentsReactSig && reactSig !== S.momentsReactSig && typeof BuzzMotion !== "undefined") {
+    BuzzMotion.heartBurst(6);
+  }
+  S.moments = data.moments;
+  S.momentsSig = sig;
+  S.momentsReactSig = reactSig;
+  paintMomentGrid();
+  if (S.momentOpen) loadMomentComments(S.momentOpen).catch(() => {});
+}
+
+async function pullGame() {
+  if (!S.gameType) return;
+  const data = await api("game", { query: { type: S.gameType } });
+  const next = data.game;
+  const changed = !S.game || gameStateSig(S.game) !== gameStateSig(next);
+  if (changed) {
+    S.game = next;
+    S.selected = next.mustFrom || null;
+    paintGame();
+  }
+  checkTurnNotify(next);
+}
+
+function paintGameComments() {
+  const list = document.getElementById("game-msgs");
+  if (!list) return;
+  const sig = S.gameComments.map((c) => c.id).join(",");
+  if (sig === S.gameCommentsSig && S.gameCommentsType === S.gameType) return;
+  S.gameCommentsSig = sig;
+  S.gameCommentsType = S.gameType || "";
+  list.innerHTML = gameCommentsHtml();
+  list.scrollTop = list.scrollHeight;
+}
+
+function paintGame() {
+  const root = document.getElementById("game-root");
+  if (root) root.innerHTML = gameInner();
+  paintGameComments();
+}
+
+async function pullGameComments() {
+  const type = S.gameType;
+  if (!type || S.route !== "games") return;
+  if (S.gameCommentsType && S.gameCommentsType !== type) {
+    S.gameComments = [];
+    S.gameCommentsSig = "";
+  }
+  const since = S.gameComments.length ? S.gameComments[S.gameComments.length - 1].id : 0;
+  const data = await api("game_comments", { query: { type, since: since || undefined } });
+  if (since > 0) {
+    if (data.comments.length) S.gameComments = S.gameComments.concat(data.comments);
+  } else {
+    S.gameComments = data.comments || [];
+  }
+  S.gameCommentsType = type;
+  paintGameComments();
+}
+
+async function reloadGame() {
+  if (!S.gameType) return;
+  const data = await api("game", { query: { type: S.gameType } });
+  S.game = data.game;
+  S.selected = S.game.mustFrom || null;
+  S.solSel = null;
+  paintGame();
+}
+
+async function solMove(payload) {
+  const data = await api("game_move", {
+    method: "POST",
+    json: { type: "solitaire", version: S.game.version, ...payload },
+  });
+  S.game = data.game;
+  S.solSel = null;
+  checkTurnNotify(S.game);
+  paintGame();
+  refreshState().catch(() => {});
+}
+
+async function kahootMove(payload) {
+  const data = await api("game_move", {
+    method: "POST",
+    json: { type: "kahoot", version: S.game.version, ...payload },
+  });
+  S.game = data.game;
+  checkTurnNotify(S.game);
+  paintGame();
+  refreshState().catch(() => {});
+}
+
+async function playTtt(index) {
+  const data = await api("game_move", {
+    method: "POST",
+    json: { type: "tictactoe", index, version: S.game.version },
+  });
+  S.game = data.game;
+  checkTurnNotify(S.game);
+  paintGame();
+  refreshState().catch(() => {});
+}
+
+async function pickSquare(row, col) {
+  const game = S.game;
+  if (!game || !game.yourTurn) return;
+  const piece = game.board[row][col];
+  const side = piece === "r" || piece === "R" ? "red" : piece === "b" || piece === "B" ? "black" : null;
+  const dest = S.selected && (game.legal || []).some((move) => (
+    move.from[0] === S.selected[0] && move.from[1] === S.selected[1] && move.to[0] === row && move.to[1] === col
+  ));
+  if (dest) {
+    const data = await api("game_move", {
+      method: "POST",
+      json: { type: "checkers", from: S.selected, to: [row, col], version: game.version },
+    });
+    S.game = data.game;
+    S.selected = data.game.mustFrom || null;
+    checkTurnNotify(S.game);
+    paintGame();
+    refreshState().catch(() => {});
+    return;
+  }
+  if (side === game.youAre) {
+    S.selected = [row, col];
+    paintGame();
+  }
+}
+
+function ytId(input) {
+  const raw = String(input || "").trim();
+  if (/^[\w-]{11}$/.test(raw)) return raw;
+  try {
+    const url = new URL(raw);
+    if (url.hostname.includes("youtu.be")) return url.pathname.slice(1, 12);
+    const watch = url.searchParams.get("v");
+    if (watch && /^[\w-]{11}$/.test(watch)) return watch;
+    const match = url.pathname.match(/\/(?:embed|shorts)\/([\w-]{11})/);
+    if (match) return match[1];
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function playerVideoId() {
+  if (!S.player || typeof S.player.getVideoData !== "function") return "";
+  try {
+    return S.player.getVideoData().video_id || "";
+  } catch {
+    return "";
+  }
+}
+
+function setupWatch() {
+  if (!document.getElementById("player") || S.player) return;
+  if (window.YT && window.YT.Player) {
+    createPlayer();
+    return;
+  }
+  window.onYouTubeIframeAPIReady = () => createPlayer();
+  if (!document.getElementById("yt-api")) {
+    const tag = document.createElement("script");
+    tag.id = "yt-api";
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+  }
+}
+
+function createPlayer() {
+  if (!document.getElementById("player") || S.player || !window.YT) return;
+  const start = S.watchLoadPending || S.watch;
+  S.player = new YT.Player("player", {
+    videoId: start?.videoId || undefined,
+    playerVars: { rel: 0, modestbranding: 1, playsinline: 1, autoplay: start?.playing ? 1 : 0 },
+    events: {
+      onReady: (event) => {
+        const frame = event.target.getIframe();
+        frame.style.width = "100%";
+        frame.style.height = "100%";
+        const pending = S.watchLoadPending;
+        S.watchLoadPending = null;
+        if (pending) applyWatchToPlayer(pending, { local: true });
+        else if (S.watch?.videoId) applyWatchToPlayer(S.watch, { local: Number(S.watch.updatedBy) === Number(S.user?.id) });
+      },
+      onStateChange: onWatchState,
+    },
+  });
+}
+
+function applyWatchToPlayer(watch, { local = false } = {}) {
+  if (!watch?.videoId) return;
+  if (!S.player || typeof S.player.loadVideoById !== "function") {
+    S.watchLoadPending = watch;
+    setupWatch();
+    return;
+  }
+  if (!local && Number(watch.updatedBy) === Number(S.user?.id)) return;
+  S.applyingWatch = true;
+  try {
+    const current = playerVideoId();
+    const time = local && !watch.playing ? watch.position || 0 : expectedTime(watch);
+    if (current !== watch.videoId) {
+      if (watch.playing || local) S.player.loadVideoById({ videoId: watch.videoId, startSeconds: time });
+      else S.player.cueVideoById({ videoId: watch.videoId, startSeconds: watch.position || 0 });
+    } else {
+      if (Math.abs((S.player.getCurrentTime() || 0) - time) > 1.8) S.player.seekTo(time, true);
+      const state = S.player.getPlayerState();
+      if (watch.playing && state !== YT.PlayerState.PLAYING) S.player.playVideo();
+      if (!watch.playing && state === YT.PlayerState.PLAYING) S.player.pauseVideo();
+    }
+  } catch {
+    /* player not ready yet */
+  }
+  setTimeout(() => {
+    S.applyingWatch = false;
+    try {
+      S.lastT = S.player?.getCurrentTime?.();
+    } catch {
+      S.lastT = null;
+    }
+    S.lastTAt = Date.now();
+  }, 800);
+}
+
+function onWatchState(event) {
+  if (S.applyingWatch || !window.YT) return;
+  if (event.data === YT.PlayerState.PLAYING) schedulePush(true);
+  if (event.data === YT.PlayerState.PAUSED) schedulePush(false);
+}
+
+let pushTimer = null;
+function schedulePush(playing) {
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => pushWatch(playing), 350);
+}
+
+async function pushWatch(playing) {
+  if (!S.player || S.applyingWatch || typeof S.player.getVideoData !== "function") return;
+  const id = S.player.getVideoData().video_id;
+  if (!id) return;
+  const data = await api("watch", {
+    method: "POST",
+    json: { videoId: id, position: S.player.getCurrentTime() || 0, playing: !!playing },
+  });
+  S.watch = data.watch;
+}
+
+function expectedTime(watch) {
+  if (!watch || !watch.playing) return watch?.position || 0;
+  const now = Date.now() / 1000 + (S.clockOffset || 0);
+  return (watch.position || 0) + Math.max(0, now - (watch.updatedAt || now));
+}
+
+function applyRemoteWatch(watch) {
+  applyWatchToPlayer(watch, { local: false });
+}
+
+function maybePushSeek() {
+  if (!window.YT || !S.player || S.applyingWatch || typeof S.player.getCurrentTime !== "function") return;
+  let time;
+  let state;
+  try {
+    time = S.player.getCurrentTime();
+    state = S.player.getPlayerState();
+  } catch {
+    return;
+  }
+  if (state !== YT.PlayerState.PLAYING && state !== YT.PlayerState.PAUSED) {
+    S.lastT = time;
+    S.lastTAt = Date.now();
+    return;
+  }
+  const playing = state === YT.PlayerState.PLAYING;
+  if (S.lastT == null) {
+    S.lastT = time;
+    S.lastTAt = Date.now();
+    return;
+  }
+  const dt = (Date.now() - S.lastTAt) / 1000;
+  const jumped = Math.abs(time - S.lastT - (playing ? dt : 0)) > 2.2;
+  S.lastT = time;
+  S.lastTAt = Date.now();
+  if (jumped) pushWatch(playing);
+}
+
+async function pullWatch() {
+  maybePushSeek();
+  const data = await api("watch");
+  S.clockOffset = data.serverNow - Date.now() / 1000;
+  const watch = data.watch;
+  const prevVideo = S.watch?.videoId;
+  const changed = !S.watch || watch.updatedAt !== S.watch.updatedAt || watch.videoId !== S.watch.videoId || watch.playing !== S.watch.playing;
+  S.watch = watch;
+  if (!watch.videoId) return;
+  const mine = Number(watch.updatedBy) === Number(S.user?.id);
+  if (changed) {
+    if (mine) applyWatchToPlayer(watch, { local: true });
+    else applyRemoteWatch(watch);
+    if (watch.videoId !== prevVideo) {
+      S.watchComments = [];
+      S.watchCommentsSig = "";
+      S.watchCommentsVideo = watch.videoId;
+      paintWatchComments();
+      pullWatchComments().catch(() => {});
+    }
+    return;
+  }
+  if (mine && playerVideoId() !== watch.videoId) applyWatchToPlayer(watch, { local: true });
+}
+
+function paintWatchComments() {
+  const list = document.getElementById("watch-msgs");
+  if (!list) return;
+  const sig = S.watchComments.map((c) => c.id).join(",");
+  if (sig === S.watchCommentsSig && S.watchCommentsVideo === (S.watch?.videoId || "")) return;
+  S.watchCommentsSig = sig;
+  S.watchCommentsVideo = S.watch?.videoId || "";
+  list.innerHTML = watchCommentsHtml();
+  list.scrollTop = list.scrollHeight;
+  const form = document.querySelector("[data-form='watch-chat']");
+  const vid = S.watch?.videoId;
+  if (form) {
+    form.hidden = !vid;
+    form.querySelectorAll("input, button").forEach((el) => { el.disabled = !vid; });
+    if (!vid) closeEmojiBars();
+  }
+  const hint = document.querySelector(".watch-chat-hint");
+  if (hint) hint.textContent = vid ? "Comments for this video only." : "Pick a video to chat here.";
+}
+
+async function pullWatchComments() {
+  const vid = S.watch?.videoId;
+  if (!vid || S.route !== "watch") return;
+  if (S.watchCommentsVideo && S.watchCommentsVideo !== vid) {
+    S.watchComments = [];
+    S.watchCommentsSig = "";
+  }
+  const since = S.watchComments.length ? S.watchComments[S.watchComments.length - 1].id : 0;
+  const data = await api("watch_comments", { query: { video: vid, since: since || undefined } });
+  if (since > 0) {
+    if (data.comments.length) S.watchComments = S.watchComments.concat(data.comments);
+  } else {
+    S.watchComments = data.comments || [];
+  }
+  S.watchCommentsVideo = vid;
+  paintWatchComments();
+}
+
+function setCallStatus(text) {
+  S.callStatus = text;
+  const el = document.getElementById("call-status");
+  if (el) el.textContent = text;
+}
+
+function paintCallActions() {
+  const el = document.getElementById("call-actions");
+  if (el) el.innerHTML = callActionsHtml();
+}
+
+function attachCallMedia() {
+  const local = document.getElementById("local-video");
+  const remote = document.getElementById("remote-video");
+  if (local && Call.local) local.srcObject = Call.local;
+  if (remote && Call.remote) remote.srcObject = Call.remote;
+}
+
+function showIncoming() {
+  const caller = (S.bubbles || []).find((bubble) => bubble.id === S.incomingBubbleId);
+  const name = caller?.partner?.displayName || "Someone";
+  document.getElementById("toast-text").textContent = `${name} is calling.`;
+  document.getElementById("toast-actions").innerHTML = `<button class="btn rose" type="button" data-act="answer-call">Answer</button><button class="btn ghost" type="button" data-act="decline-call">Not now</button>`;
+  document.getElementById("toast").hidden = false;
+}
+
+function hideToast() {
+  document.getElementById("toast").hidden = true;
+}
+
+async function signalSend(kind, payload, bubbleId) {
+  await api("signal", { method: "POST", json: { kind, payload }, bubbleId: bubbleId || S.callBubbleId || S.bubble?.id });
+}
+
+async function flushIce() {
+  const queued = S.earlyIce.splice(0);
+  for (const candidate of queued) {
+    try {
+      await Call.pc.addIceCandidate(candidate);
+    } catch {
+      /* ignore late candidates */
+    }
+  }
+}
+
+async function ensureMedia() {
+  if (Call.local) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("Video calls need a browser that allows the camera on localhost or HTTPS.");
+  }
+  try {
+    Call.local = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  } catch {
+    throw new Error("Allow the camera and microphone, then try the call again.");
+  }
+  const local = document.getElementById("local-video");
+  if (local) local.srcObject = Call.local;
+}
+
+function setupPeer() {
+  Call.pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+  Call.local.getTracks().forEach((track) => Call.pc.addTrack(track, Call.local));
+  Call.pc.ontrack = (event) => {
+    Call.remote = event.streams[0];
+    const video = document.getElementById("remote-video");
+    if (video) video.srcObject = event.streams[0];
+    setCallStatus("You're live");
+  };
+  Call.pc.onicecandidate = (event) => {
+    if (event.candidate) signalSend("ice", event.candidate.toJSON());
+  };
+  Call.pc.onconnectionstatechange = () => {
+    const state = Call.pc?.connectionState;
+    if (state === "connected") setCallStatus("You're live");
+    if (state === "failed") setCallStatus("The call could not connect. Try again in a moment.");
+    if (state === "disconnected") setCallStatus("Reconnecting…");
+  };
+}
+
+async function startCall() {
+  if (S.incomingOffer && !Call.active) return acceptCall();
+  if (Call.pc) return;
+  S.callBubbleId = S.bubble?.id || null;
+  await ensureMedia();
+  setupPeer();
+  Call.active = true;
+  Call.making = true;
+  const offer = await Call.pc.createOffer();
+  await Call.pc.setLocalDescription(offer);
+  await signalSend("offer", { type: offer.type, sdp: offer.sdp });
+  paintCallActions();
+  setCallStatus(`Calling ${partnerName()}…`);
+}
+
+async function acceptCall() {
+  if (!S.incomingOffer) return;
+  hideToast();
+  if (S.incomingBubbleId && S.bubble?.id !== S.incomingBubbleId) {
+    const next = (S.bubbles || []).find((bubble) => bubble.id === S.incomingBubbleId && bubble.status === "active");
+    if (next) {
+      S.bubble = next;
+      rememberBubble(next.id);
+      S.chat = [];
+      S.notes = [];
+      S.moments = [];
+      S.game = null;
+    }
+  }
+  S.callBubbleId = S.bubble?.id || S.incomingBubbleId;
+  if (S.route !== "call") await go("call", { force: true });
+  await ensureMedia();
+  if (!Call.pc) setupPeer();
+  Call.active = true;
+  Call.making = false;
+  await Call.pc.setRemoteDescription(new RTCSessionDescription(S.incomingOffer));
+  await flushIce();
+  const answer = await Call.pc.createAnswer();
+  await Call.pc.setLocalDescription(answer);
+  await signalSend("answer", { type: answer.type, sdp: answer.sdp });
+  paintCallActions();
+  setCallStatus("Connecting…");
+}
+
+async function endCall(send) {
+  if (send && S.bubble && S.bubble.status === "active") {
+    try {
+      await signalSend("hangup", {});
+    } catch {
+      /* already leaving */
+    }
+  }
+  if (Call.pc) {
+    Call.pc.ontrack = null;
+    Call.pc.close();
+  }
+  Call.pc = null;
+  Call.active = false;
+  Call.making = false;
+  if (Call.local) Call.local.getTracks().forEach((track) => track.stop());
+  Call.local = null;
+  Call.remote = null;
+  S.incomingOffer = null;
+  S.incomingBubbleId = null;
+  S.callBubbleId = null;
+  S.earlyIce = [];
+  S.micOff = false;
+  S.camOff = false;
+  const local = document.getElementById("local-video");
+  const remote = document.getElementById("remote-video");
+  if (local) local.srcObject = null;
+  if (remote) remote.srcObject = null;
+  hideToast();
+  paintCallActions();
+  setCallStatus("Call ended");
+}
+
+async function handleSignal(sig) {
+  if (sig.kind === "pulse") {
+    if (sig.bubbleId === S.bubble?.id && typeof BuzzMotion !== "undefined") {
+      BuzzMotion.partnerPulse(partnerName());
+    }
+    return;
+  }
+  const forThisCall = !sig.bubbleId || sig.bubbleId === S.callBubbleId || sig.bubbleId === S.incomingBubbleId;
+  if (sig.kind === "hangup") {
+    if (!forThisCall && S.callBubbleId) return;
+    hideToast();
+    S.incomingOffer = null;
+    S.incomingBubbleId = null;
+    if (Call.pc || Call.local) await endCall(false);
+    else setCallStatus("Call ended");
+    return;
+  }
+  if (sig.kind === "offer") {
+    if (Call.making) return;
+    S.incomingOffer = sig.payload;
+    S.incomingBubbleId = sig.bubbleId || S.bubble?.id || null;
+    if (!Call.active) showIncoming();
+    return;
+  }
+  if (sig.bubbleId && S.callBubbleId && sig.bubbleId !== S.callBubbleId) return;
+  if (sig.kind === "answer" && Call.pc) {
+    await Call.pc.setRemoteDescription(new RTCSessionDescription(sig.payload));
+    await flushIce();
+    setCallStatus("Connected");
+    return;
+  }
+  if (sig.kind === "ice") {
+    if (Call.pc && Call.pc.remoteDescription) {
+      try {
+        await Call.pc.addIceCandidate(sig.payload);
+      } catch {
+        /* ignore */
+      }
+    } else S.earlyIce.push(sig.payload);
+  }
+}
+
+function enqueueSignal(sig) {
+  signalChain = signalChain.then(() => handleSignal(sig)).catch(() => {});
+}
+
+async function pullSignals() {
+  if (!S.signalsReady) {
+    const data = await api("signals", { query: { baseline: 1 } });
+    S.lastSignalId = data.latest || 0;
+    S.signalsReady = true;
+    return;
+  }
+  const data = await api("signals", { query: { since: S.lastSignalId } });
+  S.lastSignalId = data.latest || S.lastSignalId;
+  data.signals.forEach(enqueueSignal);
+}
+
+async function openBubble(id) {
+  const card = document.querySelector(`[data-act="open-bubble"][data-id="${id}"]`);
+  if (card && effectsOn()) card.classList.add("bubble-expand");
+  const next = (S.bubbles || []).find((bubble) => bubble.id === id && bubble.status === "active");
+  if (!next) return;
+  if (card && effectsOn()) await new Promise((resolve) => window.setTimeout(resolve, 320));
+  if ((Call.pc || Call.local) && S.bubble?.id !== next.id) await endCall(true);
+  S.bubble = next;
+  S.partnerOnlineWas = false;
+  rememberBubble(next.id);
+  S.chat = [];
+  S.notes = [];
+  S.moments = [];
+  S.watch = null;
+  S.watchComments = [];
+  S.watchCommentsSig = "";
+  S.watchCommentsVideo = "";
+  S.gameComments = [];
+  S.gameCommentsSig = "";
+  S.gameCommentsType = "";
+  S.turnHadMine = undefined;
+  S.momentOpen = 0;
+  S.momentComments = {};
+  S.game = null;
+  S.gameType = null;
+  await go("home", { force: true });
+}
+
+async function copyUsername() {
+  const text = S.user.username;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  showFlash("Username copied.");
+}
+
+async function onClick(event) {
+  const el = event.target.closest("[data-act]");
+  if (!el) return;
+  const act = el.dataset.act;
+  try {
+    if (act === "go") {
+      if (el.dataset.mode) S.authMode = el.dataset.mode;
+      await go(el.dataset.route, { force: el.dataset.route !== S.route || !!el.dataset.mode });
+      return;
+    }
+    if (act === "auth-tab") {
+      S.authMode = el.dataset.mode;
+      S.error = "";
+      render();
+      return;
+    }
+    if (act === "copy-user") return copyUsername();
+    if (act === "emoji-toggle") {
+      const key = el.dataset.for;
+      const bar = document.querySelector(`.emoji-bar[data-emoji-for="${key}"]`);
+      if (!bar) return;
+      const willOpen = bar.hidden;
+      closeEmojiBars();
+      bar.hidden = !willOpen;
+      return;
+    }
+    if (act === "emoji-pick") {
+      const form = document.querySelector(`[data-form="${el.dataset.for}"]`);
+      const input = form?.querySelector('input[name="body"]');
+      insertAtCursor(input, el.dataset.emoji || "");
+      return;
+    }
+    if (act === "look") {
+      const patch = {};
+      patch[el.dataset.key] = el.dataset.value === "none" ? "" : el.dataset.value;
+      if (el.dataset.key === "mode" && currentLook().preset === "custom") {
+        patch.bg = patch.mode === "dark" ? "#1c1614" : "#f6f1ec";
+      }
+      if (el.dataset.key === "preset" && el.dataset.value !== "custom") patch.accent = "";
+      await saveLook(patch);
+      return;
+    }
+    if (act === "open-bubble") {
+      await openBubble(Number(el.dataset.id));
+      return;
+    }
+    if (act === "accept" || act === "decline") {
+      const id = Number(el.dataset.id);
+      const data = await api("respond", { method: "POST", json: { accept: act === "accept", id } });
+      if (act === "accept" && data.bubble) {
+        S.bubble = data.bubble;
+        rememberBubble(data.bubble.id);
+        await refreshState();
+        await go("home", { force: true });
+      } else {
+        await refreshState();
+        S.flash = "Invite declined.";
+        render();
+      }
+      return;
+    }
+    if (act === "cancel-invite") {
+      await api("cancel", { method: "POST", json: { id: Number(el.dataset.id) } });
+      await refreshState();
+      S.flash = "Invite cancelled.";
+      render();
+      return;
+    }
+    if (act === "ask-leave") {
+      S.askLeave = true;
+      render();
+      return;
+    }
+    if (act === "leave") {
+      await api("leave", { method: "POST", json: {} });
+      S.bubble = null;
+      rememberBubble(0);
+      S.chat = [];
+      S.notes = [];
+      S.moments = [];
+      S.game = null;
+      await refreshState();
+      await go("bubbles", { force: true });
+      return;
+    }
+    if (act === "logout") {
+      if (Call.pc || Call.local) await endCall(true);
+      await api("logout", { method: "POST", json: {} });
+      S.user = null;
+      S.bubble = null;
+      S.bubbles = [];
+      rememberBubble(0);
+      S.signalsReady = false;
+      S.stateReady = false;
+      await go("landing", { force: true });
+      return;
+    }
+    if (act === "swatch") {
+      S.noteColor = el.dataset.color;
+      document.querySelectorAll(".swatch").forEach((swatch) => swatch.classList.toggle("on", swatch.dataset.color === S.noteColor));
+      return;
+    }
+    if (act === "delete-note") {
+      const id = Number(el.dataset.id);
+      await api("delete_note", { method: "POST", json: { id } });
+      S.notes = S.notes.filter((note) => note.id !== id);
+      S.notesSig = S.notes.map((note) => note.id).join(",");
+      const grid = document.getElementById("note-grid");
+      if (grid) grid.innerHTML = notesHtml();
+      return;
+    }
+    if (act === "delete-moment") {
+      const id = Number(el.dataset.id);
+      await api("delete_moment", { method: "POST", json: { id } });
+      S.moments = S.moments.filter((moment) => moment.id !== id);
+      delete S.momentComments[id];
+      if (S.momentOpen === id) S.momentOpen = 0;
+      S.momentsSig = "";
+      paintMomentGrid();
+      return;
+    }
+    if (act === "date-night") {
+      await runDateNight();
+      return;
+    }
+    if (act === "mood-pick") {
+      S.activityKey = "mood";
+      if (!S.activity) await loadActivity("mood");
+      await activityAction({ emoji: el.dataset.emoji });
+      render();
+      return;
+    }
+    if (act === "wyr-pick") {
+      S.activityKey = "wyr";
+      await activityAction({ action: "pick", choice: el.dataset.choice });
+      render();
+      return;
+    }
+    if (act === "playlist-play") {
+      await activityAction({ action: "play", trackId: Number(el.dataset.id) });
+      showFlash("Now playing for both of you.");
+      render();
+      return;
+    }
+    if (act === "playlist-react") {
+      await activityAction({ action: "react", trackId: Number(el.dataset.id), emoji: el.dataset.emoji });
+      if (typeof BuzzMotion !== "undefined") BuzzMotion.reactBurst(el.dataset.emoji);
+      render();
+      return;
+    }
+    if (act === "draw-color") {
+      S.drawColor = el.dataset.color || "#e85d6f";
+      return;
+    }
+    if (act === "draw-clear") {
+      await activityAction({ action: "clear" });
+      setupDrawCanvas();
+      return;
+    }
+    if (act === "bucket-done") {
+      await activityAction({ action: "done", id: Number(el.dataset.id) });
+      if (typeof BuzzMotion !== "undefined") BuzzMotion.confetti(24);
+      render();
+      return;
+    }
+    if (act === "fav-open") {
+      const type = el.dataset.type;
+      const id = el.dataset.id;
+      if (type === "note") await go("notes", { force: true });
+      else if (type === "moment") await go("moments", { force: true });
+      else if (type === "watch") await go("watch", { force: true });
+      return;
+    }
+    if (act === "thinking") {
+      await api("signal", { method: "POST", json: { kind: "pulse" } });
+      document.body.classList.add("self-pulse");
+      window.setTimeout(() => document.body.classList.remove("self-pulse"), 1200);
+      if (typeof BuzzMotion !== "undefined") BuzzMotion.heartBurst(4);
+      showFlash("A gentle pulse is on its way.");
+      return;
+    }
+    if (act === "moment-react") {
+      if (effectsOn()) {
+        el.classList.add("react-burst");
+        window.setTimeout(() => el.classList.remove("react-burst"), 520);
+        if (typeof BuzzMotion !== "undefined") BuzzMotion.reactBurst(el.dataset.emoji || "");
+      }
+      await momentReact(Number(el.dataset.id), el.dataset.emoji || "");
+      S.momentsReactSig = momentReactSig(S.moments);
+      return;
+    }
+    if (act === "moment-comments") {
+      const id = Number(el.dataset.id);
+      if (S.momentOpen === id) {
+        S.momentOpen = 0;
+        paintMomentGrid();
+        return;
+      }
+      S.momentOpen = id;
+      paintMomentGrid();
+      await loadMomentComments(id);
+      return;
+    }
+    if (act === "play") {
+      S.gameType = el.dataset.type;
+      S.gameComments = [];
+      S.gameCommentsSig = "";
+      S.gameCommentsType = "";
+      S.turnHadMine = undefined;
+      S.game = (await api("game", { query: { type: S.gameType } })).game;
+      S.selected = S.game.mustFrom || null;
+      S.solSel = null;
+      checkTurnNotify(S.game);
+      render();
+      pullGameComments().catch(() => {});
+      return;
+    }
+    if (act === "game-lobby") {
+      S.gameType = null;
+      S.game = null;
+      S.turnHadMine = undefined;
+      closeEmojiBars();
+      render();
+      return;
+    }
+    if (act === "reset-game") {
+      const data = await api("game_reset", { method: "POST", json: { type: S.gameType } });
+      S.game = data.game;
+      S.selected = null;
+      S.solSel = null;
+      S.turnHadMine = undefined;
+      checkTurnNotify(S.game);
+      paintGame();
+      return;
+    }
+    if (act === "sol-draw") return solMove({ action: "draw" });
+    if (act === "sol-waste-foundation") return solMove({ action: "waste_to_foundation" });
+    if (act === "sol-foundation") {
+      if (S.solSel) return solMove({ action: "tableau_to_foundation", pile: S.solSel.pile });
+      return;
+    }
+    if (act === "sol-pick") {
+      event.stopPropagation();
+      const pile = Number(el.dataset.pile);
+      const at = Number(el.dataset.at);
+      if (S.solSel && S.solSel.pile === pile && S.solSel.at === at) {
+        S.solSel = null;
+        paintGame();
+        return;
+      }
+      if (S.solSel) {
+        await solMove({ action: "tableau_to_tableau", from: S.solSel.pile, to: pile, at: S.solSel.at });
+        return;
+      }
+      S.solSel = { pile, at };
+      paintGame();
+      return;
+    }
+    if (act === "sol-col") {
+      const pile = Number(el.dataset.pile);
+      if (S.solSel) {
+        await solMove({ action: "tableau_to_tableau", from: S.solSel.pile, to: pile, at: S.solSel.at });
+        return;
+      }
+      await solMove({ action: "waste_to_tableau", pile });
+      return;
+    }
+    if (act === "kahoot-pack") return kahootMove({ action: "load_pack", pack: el.dataset.pack });
+    if (act === "kahoot-clear") return kahootMove({ action: "clear_questions" });
+    if (act === "kahoot-start") return kahootMove({ action: "start" });
+    if (act === "kahoot-next") return kahootMove({ action: "next" });
+    if (act === "kahoot-answer") return kahootMove({ action: "answer", choice: Number(el.dataset.choice) });
+    if (act === "ttt") return playTtt(Number(el.dataset.i));
+    if (act === "pick") return pickSquare(Number(el.dataset.r), Number(el.dataset.c));
+    if (act === "start-call") return startCall();
+    if (act === "answer-call") return acceptCall();
+    if (act === "decline-call") {
+      const bubbleId = S.incomingBubbleId;
+      hideToast();
+      S.incomingOffer = null;
+      S.incomingBubbleId = null;
+      if (bubbleId) await signalSend("hangup", {}, bubbleId);
+      return;
+    }
+    if (act === "hangup") return endCall(true);
+    if (act === "mute" && Call.local) {
+      const tracks = Call.local.getAudioTracks();
+      const enabled = tracks.some((track) => track.enabled);
+      tracks.forEach((track) => { track.enabled = !enabled; });
+      S.micOff = enabled;
+      paintCallActions();
+      return;
+    }
+    if (act === "camera" && Call.local) {
+      const tracks = Call.local.getVideoTracks();
+      const enabled = tracks.some((track) => track.enabled);
+      tracks.forEach((track) => { track.enabled = !enabled; });
+      S.camOff = enabled;
+      paintCallActions();
+    }
+  } catch (err) {
+    if (["ttt", "pick", "reset-game", "sol-draw", "sol-pick", "sol-col", "sol-waste-foundation", "sol-foundation", "kahoot-answer", "kahoot-start", "kahoot-next", "kahoot-pack", "kahoot-clear"].includes(act)) {
+      showError(err.message);
+      try { await reloadGame(); } catch { /* shown already */ }
+      return;
+    }
+    showError(err.message || "Something went wrong.");
+  }
+}
+
+async function onSubmit(event) {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement) || !form.dataset.form) return;
+  event.preventDefault();
+  const kind = form.dataset.form;
+  const fd = new FormData(form);
+  const button = form.querySelector('[type="submit"]');
+  if (button) button.disabled = true;
+  showError("");
+  try {
+    if (kind === "register" || kind === "login") {
+      const json = { email: fd.get("email"), password: fd.get("password") };
+      if (kind === "register") json.displayName = fd.get("name");
+      await api(kind, { method: "POST", json });
+      await refreshState();
+      await go(S.bubble?.status === "active" ? "home" : "bubbles", { force: true });
+      return;
+    }
+    if (kind === "username" || kind === "profile") {
+      const json = kind === "username"
+        ? { username: fd.get("username") }
+        : { displayName: fd.get("displayName"), username: fd.get("username") };
+      const data = await api("profile", { method: "POST", json });
+      S.user = data.user;
+      S.flash = "Saved.";
+      render();
+      return;
+    }
+    if (kind === "invite") {
+      await api("invite", { method: "POST", json: { username: fd.get("username") } });
+      await refreshState();
+      S.flash = "Invite sent.";
+      render();
+      return;
+    }
+    if (kind === "chat") {
+      const body = String(fd.get("body") || "").trim();
+      if (!body) return;
+      const sendBtn = form.querySelector('[type="submit"]');
+      if (typeof BuzzMotion !== "undefined") BuzzMotion.sendPulse(sendBtn);
+      const data = await api("message", { method: "POST", json: { body } });
+      S.chat.push(data.message);
+      form.reset();
+      closeEmojiBars();
+      const list = document.getElementById("msgs");
+      if (list) {
+        appendChatMessage(data.message);
+        list.scrollTop = list.scrollHeight;
+      }
+      markSectionSeen("chat");
+      return;
+    }
+    if (kind === "visit") {
+      const raw = String(fd.get("nextVisit") || "").trim();
+      const data = await api("bubble_meta", { method: "POST", json: { nextVisitAt: raw || null } });
+      if (data.bubble) {
+        S.bubble = data.bubble;
+        const inList = (S.bubbles || []).find((b) => b.id === data.bubble.id);
+        if (inList) Object.assign(inList, data.bubble);
+      }
+      showFlash(raw ? "Visit date saved." : "Visit date cleared.");
+      render();
+      return;
+    }
+    if (kind === "activity-chat") {
+      const key = form.dataset.activityKey;
+      const body = String(fd.get("body") || "").trim();
+      if (!key || !body) return;
+      const data = await api("activity_comment", { method: "POST", json: { key, body } });
+      const list = S.activityComments[key] || [];
+      list.push(data.comment);
+      S.activityComments[key] = list;
+      form.reset();
+      closeEmojiBars();
+      paintActivityComments();
+      return;
+    }
+    if (kind === "activity-daily") {
+      await activityAction({ action: "answer", text: fd.get("text") });
+      showFlash("Answer sent — waiting to reveal.");
+      render();
+      return;
+    }
+    if (kind === "activity-playlist") {
+      await activityAction({ action: "add", title: fd.get("title"), url: fd.get("url") });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "activity-milestone") {
+      await activityAction({ action: "milestone", title: fd.get("title"), date: fd.get("date") });
+      S.timelineFeed = await api("timeline_feed");
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "activity-bucket") {
+      await activityAction({ action: "add", text: fd.get("text") });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "activity-calendar") {
+      await activityAction({ action: "calendar", title: fd.get("title"), at: fd.get("at"), kind: "date" });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "note") {
+      await api("note", { method: "POST", json: { content: fd.get("content"), color: S.noteColor } });
+      S.notes = (await api("notes")).notes;
+      S.notesSig = S.notes.map((note) => note.id).join(",");
+      form.querySelector("textarea").value = "";
+      const grid = document.getElementById("note-grid");
+      if (grid) grid.innerHTML = notesHtml();
+      showFlash("Note pinned.");
+      markSectionSeen("notes");
+      return;
+    }
+    if (kind === "moment") {
+      const file = fd.get("photo");
+      if (!file || !file.size) {
+        showError("Choose a photo to share.");
+        return;
+      }
+      const body = new FormData();
+      body.append("caption", fd.get("caption") || "");
+      body.append("photo", file);
+      await api("moment", { method: "POST", body });
+      S.moments = (await api("moments")).moments;
+      S.momentsSig = S.moments.map((moment) => `${moment.id}:${moment.commentCount}:${JSON.stringify(moment.reactionCounts)}:${moment.myReaction || ""}`).join("|");
+      form.reset();
+      paintMomentGrid();
+      showFlash("Shared.");
+      markSectionSeen("moments");
+      return;
+    }
+    if (kind.startsWith("moment-comment-")) {
+      const momentId = Number(kind.slice("moment-comment-".length));
+      const body = String(fd.get("body") || "").trim();
+      if (!momentId || !body) return;
+      const data = await api("moment_comment", { method: "POST", json: { momentId, body } });
+      const list = S.momentComments[momentId] || [];
+      list.push(data.comment);
+      S.momentComments[momentId] = list;
+      const moment = S.moments.find((row) => row.id === momentId);
+      if (moment) moment.commentCount = (moment.commentCount || 0) + 1;
+      form.reset();
+      closeEmojiBars();
+      paintMomentGrid();
+      return;
+    }
+    if (kind === "game-chat") {
+      const type = S.gameType;
+      const body = String(fd.get("body") || "").trim();
+      if (!type) return;
+      if (!body) return;
+      const data = await api("game_comment", { method: "POST", json: { gameType: type, body } });
+      S.gameComments.push(data.comment);
+      S.gameCommentsSig = S.gameComments.map((c) => c.id).join(",");
+      form.reset();
+      closeEmojiBars();
+      paintGameComments();
+      return;
+    }
+    if (kind === "kahoot-add") {
+      const correct = Number(fd.get("correct"));
+      await kahootMove({
+        action: "add_question",
+        prompt: fd.get("prompt"),
+        choices: [fd.get("c0"), fd.get("c1"), fd.get("c2"), fd.get("c3")],
+        correct,
+      });
+      form.reset();
+      return;
+    }
+    if (kind === "watch-chat") {
+      const vid = S.watch?.videoId;
+      const body = String(fd.get("body") || "").trim();
+      if (!vid) {
+        showError("Start a video before commenting.");
+        return;
+      }
+      if (!body) return;
+      const data = await api("watch_comment", { method: "POST", json: { videoId: vid, body } });
+      S.watchComments.push(data.comment);
+      S.watchCommentsSig = S.watchComments.map((c) => c.id).join(",");
+      form.reset();
+      closeEmojiBars();
+      paintWatchComments();
+      markSectionSeen("watch");
+      return;
+    }
+    if (kind === "watch") {
+      const id = ytId(fd.get("url"));
+      if (!id) {
+        showError("Paste a full YouTube link.");
+        return;
+      }
+      const data = await api("watch", { method: "POST", json: { videoId: id, position: 0, playing: true } });
+      S.watch = data.watch;
+      S.watchComments = [];
+      S.watchCommentsSig = "";
+      applyWatchToPlayer(S.watch, { local: true });
+      paintWatchComments();
+      pullWatchComments().catch(() => {});
+      markSectionSeen("watch");
+      showFlash("Playing together.");
+    }
+  } catch (err) {
+    showError(err.message || "Something went wrong.");
+  } finally {
+    if (button && button.isConnected) button.disabled = false;
+  }
+}
+
+document.addEventListener("click", onClick);
+document.addEventListener("click", (event) => {
+  if (event.target.closest("[data-act='emoji-toggle'], [data-act='emoji-pick'], .emoji-bar")) return;
+  closeEmojiBars();
+});
+document.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-look-color]");
+  if (!input || !S.user) return;
+  const patch = { [input.dataset.lookColor]: input.value };
+  if (input.dataset.lookColor === "bg") patch.preset = "custom";
+  S.user = { ...S.user, appearance: normalizeLook({ ...currentLook(), ...patch }) };
+  applyLook();
+});
+document.addEventListener("change", (event) => {
+  const input = event.target.closest("[data-look-color]");
+  if (!input || !S.user) return;
+  const patch = { [input.dataset.lookColor]: input.value };
+  if (input.dataset.lookColor === "bg") patch.preset = "custom";
+  saveLook(patch);
+});
+document.addEventListener("submit", onSubmit);
+window.addEventListener("hashchange", () => {
+  const hash = (location.hash || "#landing").slice(1);
+  if (hash !== S.route) go(hash);
+});
+
+async function boot() {
+  try {
+    await refreshState();
+    S.stateReady = true;
+  } catch (err) {
+    S.bootError = err.message;
+  }
+  const hash = location.hash.replace("#", "") || (S.user ? "home" : "landing");
+  await go(hash, { force: true });
+  if (!S.polling) S.polling = setInterval(() => { tick().catch(() => {}); }, 2000);
+}
+
+boot();

@@ -1,0 +1,5 @@
+storage/*.sqlite
+storage/*.sqlite-*
+storage/moments/*
+!storage/moments/.gitkeep
+storage/error.log
