@@ -7,6 +7,11 @@ const BuzzActivities = (() => {
     return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 
+  function activityBackAria() {
+    if (typeof S !== "undefined" && S.backTo && S.backTo.route === "games") return "Back to games";
+    return "Back to hub";
+  }
+
   function activityShell(key, title, eyebrow, mainHtml) {
     const composer = typeof chatComposerHtml === "function"
       ? `<form data-form="activity-chat" data-activity-key="${esc(key)}" class="composer chat-compose watch-composer">
@@ -17,9 +22,12 @@ const BuzzActivities = (() => {
         </form>`
       : "";
     return `${typeof errorHtml === "function" ? errorHtml() : ""}${typeof flashHtml === "function" ? flashHtml() : ""}
-      <button class="text-btn" type="button" data-act="go" data-route="home">← Hub</button>
-      <p class="eyebrow">${esc(eyebrow)}</p>
-      <h2>${esc(title)}</h2>
+      <header class="activity-bar glass">
+        <button class="bar-btn" type="button" data-act="nav-back" aria-label="${esc(activityBackAria())}">←</button>
+        <div class="activity-bar-title"><span class="eyebrow">${esc(eyebrow)}</span><strong>${esc(title)}</strong></div>
+        <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+        <button class="bar-btn" type="button" data-act="activity-chat-toggle" aria-label="Activity chat">💬</button>
+      </header>
       <div class="activity-layout">
         <div class="activity-main" id="activity-root">${mainHtml}</div>
         <aside class="activity-chat glass" id="activity-chat">
@@ -167,7 +175,8 @@ const BuzzActivities = (() => {
     const card = (route, title, sub, badgeKey, tone) => {
       const n = b[badgeKey] || 0;
       const badge = n ? `<span class="hub-badge">${n > 9 ? "9+" : n}</span>` : "";
-      return `<button class="hub-card ${tone}" type="button" data-act="go" data-route="${route}">${badge}<strong>${esc(title)}</strong><span>${esc(sub)}</span></button>`;
+      const lobby = route === "games" ? ` data-lobby="1"` : "";
+      return `<button class="hub-card ${tone}" type="button" data-act="go" data-route="${route}"${lobby}>${badge}<strong>${esc(title)}</strong><span>${esc(sub)}</span></button>`;
     };
     return `${typeof errorHtml === "function" ? errorHtml() : ""}${typeof flashHtml === "function" ? flashHtml() : ""}
       ${typeof intimacyBarHtml === "function" ? intimacyBarHtml() : ""}
@@ -188,16 +197,16 @@ const BuzzActivities = (() => {
         ${card("draw", "Create", "Draw & notes", "hubCreate", "tone-create")}
       </div>
       <div class="hub-strip gap-top">
-        <button class="qbtn" type="button" data-act="go" data-route="daily">Daily question</button>
-        <button class="qbtn" type="button" data-act="go" data-route="mood">Mood</button>
-        <button class="qbtn" type="button" data-act="go" data-route="timeline">Timeline</button>
-        <button class="qbtn" type="button" data-act="go" data-route="playlist">Playlist</button>
-        <button class="qbtn" type="button" data-act="go" data-route="wyr">Quick match</button>
-        <button class="qbtn" type="button" data-act="go" data-route="bucket">Bucket list</button>
-        <button class="qbtn" type="button" data-act="go" data-route="quiz">Couple quiz</button>
-        <button class="qbtn" type="button" data-act="go" data-route="scrapbook">Scrapbook</button>
-        <button class="qbtn" type="button" data-act="go" data-route="jar">Love jar</button>
-        <button class="qbtn" type="button" data-act="go" data-route="search">Search</button>
+        <button class="qbtn" type="button" data-act="go" data-route="daily" data-back-home="1">Daily question</button>
+        <button class="qbtn" type="button" data-act="go" data-route="mood" data-back-home="1">Mood</button>
+        <button class="qbtn" type="button" data-act="go" data-route="timeline" data-back-home="1">Timeline</button>
+        <button class="qbtn" type="button" data-act="go" data-route="playlist" data-back-home="1">Playlist</button>
+        <button class="qbtn" type="button" data-act="go" data-route="wyr" data-back-home="1">Quick match</button>
+        <button class="qbtn" type="button" data-act="go" data-route="bucket" data-back-home="1">Bucket list</button>
+        <button class="qbtn" type="button" data-act="go" data-route="quiz" data-back-home="1">Couple quiz</button>
+        <button class="qbtn" type="button" data-act="go" data-route="scrapbook" data-back-home="1">Scrapbook</button>
+        <button class="qbtn" type="button" data-act="go" data-route="jar" data-back-home="1">Love jar</button>
+        <button class="qbtn" type="button" data-act="go" data-route="search" data-back-home="1">Search</button>
       </div>
       <form data-form="hub-search" class="row gap-top">
         <input name="q" placeholder="Search chat, notes, moments…" maxlength="80" class="grow">
@@ -280,10 +289,12 @@ const BuzzActivities = (() => {
       ? results.map((r) => `<button class="card preview" type="button" data-act="search-open" data-route="${esc(r.route)}">${esc(r.label)} <span class="pill">${esc(r.type)}</span></button>`).join("")
       : `<p class="empty">Type at least two characters to search your bubble.</p>`;
     return `${typeof errorHtml === "function" ? errorHtml() : ""}
-      <button class="text-btn" type="button" data-act="go" data-route="home">← Hub</button>
-      <p class="eyebrow">Hub</p>
-      <h2>Search</h2>
-      <form data-form="hub-search" class="row">
+      <header class="activity-bar glass">
+        <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to hub">←</button>
+        <div class="activity-bar-title"><span class="eyebrow">Hub</span><strong>Search</strong></div>
+        <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+      </header>
+      <form data-form="hub-search" class="row gap-top">
         <input name="q" maxlength="80" placeholder="Search…" class="grow">
         <button class="btn rose" type="submit">Go</button>
       </form>

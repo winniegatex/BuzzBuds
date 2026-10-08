@@ -13,7 +13,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,650&family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=17">
+  <link rel="stylesheet" href="assets/app.css?v=19">
 </head>
 <body class="theme-dark">
   <div id="ambience" class="ambience" aria-hidden="true">
@@ -34,8 +34,8 @@
     <div id="toast-actions"></div>
   </div>
   <noscript><p class="booting">BuzzBuds needs JavaScript turned on.</p></noscript>
-  <script src="assets/motion.js?v=17"></script>
-  <script src="assets/activities.js?v=17"></script>
-  <script src="assets/app.js?v=17"></script>
+  <script src="assets/motion.js?v=19"></script>
+  <script src="assets/activities.js?v=19"></script>
+  <script src="assets/app.js?v=19"></script>
 </body>
 </html>

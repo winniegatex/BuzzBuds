@@ -1,0 +1,36 @@
+name: Deploy via FTP
+
+on:
+  push:
+    branches:
+      - main  # Change this if your default branch is 'master'
+
+jobs:
+  ftp-deploy:
+    name: 🎉 Deploy to Server
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # Required so the action knows which files changed
+
+      - name: 📂 Sync files via FTP
+        uses: SamKirkland/FTP-Deploy-Action@4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          # port: 21 # Uncomment this line if your FTP port is NOT 21
+          
+          # Change this if your website lives in a subfolder (e.g., /public_html/)
+          server-dir: / 
+          
+          # Files and folders to ignore during deployment
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/.github/**
+            **/.env
+            **/*.db
+            **/*.sqlite

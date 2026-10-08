@@ -72,7 +72,14 @@ const S = {
   navLock: false,
   ticking: false,
   beat: 0,
+  backTo: null,
+  gamesLobby: [],
+  gamesTurnSig: "",
+  uiGameMenu: false,
+  hashNav: false,
 };
+
+const GAME_TYPES = new Set(["tictactoe", "checkers", "solitaire", "kahoot", "connect4", "memory", "hangman"]);
 
 const Call = { pc: null, local: null, remote: null, active: false, making: false };
 let signalChain = Promise.resolve();
@@ -211,6 +218,98 @@ function gameTypeLabel(type) {
   return map[type] || "your game";
 }
 
+function clientGameInProgress(game) {
+  if (!game || game.winner) return false;
+  if (game.type === "solitaire") return (game.you?.moves || 0) > 0;
+  if (game.type === "kahoot") return game.phase && game.phase !== "build" && game.phase !== "done";
+  if (game.type === "hangman") return game.phase === "guess" || !!game.mask;
+  if (game.type === "tictactoe") return game.board?.some((c) => c !== null);
+  if (game.type === "connect4") return game.board?.some((row) => row.some((c) => c !== null));
+  if (game.type === "memory") return game.cards?.some((c) => c.matched || c.up);
+  if (game.type === "checkers") return !!game.lastMove;
+  return false;
+}
+
+function gameActionsFooter(game) {
+  if (game.winner) {
+    return `<div class="row gap-top game-actions">
+      <button class="btn rose" type="button" data-act="reset-game">Play again</button>
+      <button class="btn soft" type="button" data-act="go" data-route="games" data-lobby="1">Back to games</button>
+      <button class="btn ghost" type="button" data-act="go" data-route="home">Home</button>
+    </div>`;
+  }
+  return `<div class="row gap-top game-actions">
+    <button class="btn ghost" type="button" data-act="game-menu">Leave game</button>
+  </div>`;
+}
+
+function wrapGameBody(html, game) {
+  return `${html}${gameActionsFooter(game)}`;
+}
+
+function gameBarHtml(title) {
+  return `<header class="activity-bar glass">
+    <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to games">←</button>
+    <div class="activity-bar-title"><span class="eyebrow">Games</span><strong>${esc(title)}</strong></div>
+    <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+    <button class="bar-btn" type="button" data-act="game-menu" aria-label="Game menu">⋯</button>
+  </header>`;
+}
+
+function gameLeaveOverlayHtml() {
+  if (!S.uiGameMenu) return "";
+  const canResign = S.game && !["solitaire"].includes(S.game.type) && clientGameInProgress(S.game);
+  return `<div class="game-leave-overlay" role="dialog" aria-modal="true">
+    <div class="game-leave-card glass">
+      <h3>Pause this game and come back later?</h3>
+      <p class="empty">Your board stays saved for both of you.</p>
+      <div class="stack">
+        <button class="btn rose" type="button" data-act="game-leave-pause">Pause &amp; leave</button>
+        ${canResign ? `<button class="btn soft" type="button" data-act="game-leave-resign">Resign</button>` : ""}
+        <button class="btn ghost" type="button" data-act="game-leave-stay">Stay</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function lobbyStatusPill(type) {
+  const row = (S.gamesLobby || []).find((g) => g.type === type);
+  if (!row?.status) return "";
+  const cls = row.yourTurn ? "pill turn" : "pill";
+  return `<span class="${cls}">${esc(row.status)}</span>`;
+}
+
+function gameLobbyCard(type, title, desc) {
+  return `<button class="game-card" type="button" data-act="play" data-type="${type}"><h3>${esc(title)} ${lobbyStatusPill(type)}</h3><p>${esc(desc)}</p></button>`;
+}
+
+async function leaveGameLobby() {
+  S.uiGameMenu = false;
+  S.backTo = { route: "home" };
+  await go("games", { lobby: true, force: true, skipBack: true });
+}
+
+async function tryLeaveGame() {
+  if (S.game && clientGameInProgress(S.game) && !S.game.winner) {
+    S.uiGameMenu = true;
+    render();
+    return;
+  }
+  await leaveGameLobby();
+}
+
+async function resignCurrentGame() {
+  if (!S.game || !S.gameType) return;
+  if (!["solitaire"].includes(S.game.type) && clientGameInProgress(S.game)) {
+    const data = await api("game_move", {
+      method: "POST",
+      json: { type: S.game.type, version: S.game.version, action: "resign" },
+    });
+    S.game = data.game;
+  }
+  await leaveGameLobby();
+}
+
 function checkTurnNotify(game) {
   if (!game) return;
   const mine = gameYourTurn(game);
@@ -220,7 +319,7 @@ function checkTurnNotify(game) {
     return;
   }
   if (mine && !S.turnHadMine) {
-    playTurnRing();
+    if (!hubNotifyMuted("games")) playTurnRing();
     if (S.route !== "games" || S.gameType !== game.type) {
       showFlash(`Your turn in ${gameTypeLabel(game.type)}.`);
     }
@@ -702,6 +801,55 @@ async function saveLook(patch) {
   }
 }
 
+function routeHash(route, gameType) {
+  if (route === "games" && gameType) return `games/${gameType}`;
+  return route;
+}
+
+function parseRouteHash(raw) {
+  const h = String(raw || "").replace(/^#/, "").trim();
+  const fallback = S.user ? "home" : "landing";
+  const parts = (h || fallback).split("/").filter(Boolean);
+  const base = parts[0] || fallback;
+  if (base === "games" && parts[1] && GAME_TYPES.has(parts[1])) {
+    return { route: "games", gameType: parts[1] };
+  }
+  return { route: base, gameType: null };
+}
+
+function defaultBackTarget(route) {
+  const activities = ["daily", "mood", "timeline", "playlist", "draw", "wyr", "bucket", "quiz", "scrapbook", "jar"];
+  if (["chat", "notes", "moments", "watch", "call", "games", "more", "look", "profile"].includes(route)) {
+    return { route: "home" };
+  }
+  if (route === "search" || route === "calendar" || route === "favorites" || activities.includes(route)) {
+    return { route: "home" };
+  }
+  return { route: "home" };
+}
+
+function navigateBack() {
+  const back = S.backTo || defaultBackTarget(S.route);
+  if (back.route === "games" && back.lobby) {
+    go("games", { lobby: true, force: true });
+    return;
+  }
+  go(back.route, { force: true });
+}
+
+function setBackTarget(target) {
+  S.backTo = target;
+}
+
+function screenBar(title, eyebrow) {
+  const back = S.backTo?.route === "games" ? "Games" : "Hub";
+  return `<header class="activity-bar glass">
+    <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to ${esc(back)}">←</button>
+    <div class="activity-bar-title"><span class="eyebrow">${esc(eyebrow)}</span><strong>${esc(title)}</strong></div>
+    <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+  </header>`;
+}
+
 function guard(route) {
   if (route === "pair") route = "bubbles";
   const known = [
@@ -734,6 +882,13 @@ async function refreshState() {
   if (S.user) rememberBubble(data.bubble?.id || 0);
   if (data.serverNow) S.clockOffset = data.serverNow - Date.now() / 1000;
   S.badges = data.badges || { bubbles: 0, chat: 0, notes: 0, moments: 0, watch: 0, games: 0 };
+  if (S.bubble?.id && !S.hubNotify) {
+    api("activity", { query: { key: "hub" } })
+      .then((hub) => {
+        S.hubNotify = hub.activity?.notify || {};
+      })
+      .catch(() => {});
+  }
   paintBadges();
   const editing = document.activeElement && document.activeElement.dataset && document.activeElement.dataset.lookColor;
   if (!editing) applyLook();
@@ -794,13 +949,15 @@ const BADGE_NAV_ROUTES = new Set(["bubbles", "chat", "notes", "moments", "watch"
 
 function navButtonHtml(route, label, ic) {
   const badgeAttr = BADGE_NAV_ROUTES.has(route) ? ` data-badge-route="${route}"` : "";
-  return `<button class="nav-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${badgeAttr}>${icon(ic)}<span class="nav-label">${label}</span></button>`;
+  const lobby = route === "games" ? ` data-lobby="1"` : "";
+  return `<button class="nav-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${lobby}${badgeAttr}>${icon(ic)}<span class="nav-label">${label}</span></button>`;
 }
 
 function tabButtonHtml(route, label, ic) {
   const badgeRoute = route === "bubbles" || route === "chat" || route === "notes" || route === "more" ? route : "";
   const badgeAttr = badgeRoute ? ` data-badge-route="${badgeRoute}"` : "";
-  return `<button class="tab-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${badgeAttr}>${icon(ic)}<span>${label}</span></button>`;
+  const lobby = route === "games" ? ` data-lobby="1"` : "";
+  return `<button class="tab-btn ${navClass(route)}" type="button" data-act="go" data-route="${route}"${lobby}${badgeAttr}>${icon(ic)}<span>${label}</span></button>`;
 }
 
 async function markSectionSeen(section) {
@@ -823,8 +980,20 @@ function bubblesSig() {
 async function go(route, opts = {}) {
   if (S.navLock) return;
   let next = guard(route);
-  if (!opts.force && S.renderedRoute === next) {
-    if (location.hash !== "#" + next) location.hash = next;
+  const lobby = !!opts.lobby;
+  let gameType = opts.gameType !== undefined ? opts.gameType : null;
+  if (next === "games") {
+    if (lobby) gameType = null;
+    else if (opts.gameType) gameType = opts.gameType;
+    else if (!opts.fromHash && !opts.keepGame) gameType = null;
+    else gameType = gameType || S.gameType;
+  } else {
+    gameType = null;
+  }
+  const sameView = S.renderedRoute === next && (next !== "games" || S.gameType === gameType);
+  if (!opts.force && sameView) {
+    const want = routeHash(next, gameType);
+    if (location.hash !== "#" + want) location.hash = want;
     return;
   }
   S.navLock = true;
@@ -839,15 +1008,38 @@ async function go(route, opts = {}) {
     }
   }
   next = guard(route);
+  if (next === "games") {
+    if (lobby) gameType = null;
+    else if (opts.gameType) gameType = opts.gameType;
+    else if (!opts.fromHash && !opts.keepGame) gameType = null;
+    else gameType = gameType || S.gameType;
+  } else {
+    gameType = null;
+  }
+  if (!opts.skipBack && opts.backTo) S.backTo = opts.backTo;
+  else if (!opts.skipBack && !opts.fromHash && next !== S.route) {
+    if (!["landing", "auth", "bubbles", "home"].includes(next)) {
+      S.backTo = S.backTo || defaultBackTarget(next);
+    }
+  }
   S.route = next;
+  S.gameType = next === "games" ? gameType : null;
+  if (next !== "games" || !gameType) {
+    if (next !== "games") {
+      S.game = null;
+      S.turnHadMine = undefined;
+    }
+    if (lobby) {
+      S.game = null;
+      S.turnHadMine = undefined;
+    }
+  }
+  S.uiGameMenu = false;
   S.askLeave = false;
   if (!opts.keepError) S.error = "";
   S.flash = opts.keepFlash ? S.flash : "";
   try {
     if (S.user && ["home", "bubbles", "profile"].includes(next)) await refreshState();
-    if (S.route !== next) {
-      /* refresh can reveal a bubble and the caller may redirect after */
-    }
     const guarded = guard(S.route);
     S.route = guarded;
     if (S.route === "chat") S.chat = (await api("messages")).messages;
@@ -863,6 +1055,12 @@ async function go(route, opts = {}) {
     if (S.route === "games" && S.gameType) {
       S.game = (await api("game", { query: { type: S.gameType } })).game;
       S.selected = S.game.mustFrom || null;
+      S.turnHadMine = undefined;
+      checkTurnNotify(S.game);
+    }
+    if (S.route === "games" && !S.gameType) {
+      const list = await api("games_list");
+      S.gamesLobby = list.games || [];
     }
     if (S.route === "watch") {
       const data = await api("watch");
@@ -872,16 +1070,21 @@ async function go(route, opts = {}) {
     if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
       await ensureActivityRoute(S.route);
     }
+    if (S.route === "look") {
+      await loadActivity("hub");
+    }
   } catch (err) {
     S.error = err.message || "Something went wrong.";
     if (!S.user) S.route = "landing";
   }
-  if (location.hash !== "#" + S.route) location.hash = S.route;
+  const hash = routeHash(S.route, S.gameType);
+  if (!S.hashNav && location.hash !== "#" + hash) location.hash = hash;
   S.renderedRoute = S.route;
   render();
   } finally {
     S.navLock = false;
     document.body.classList.remove("is-navigating");
+    S.hashNav = false;
   }
 }
 
@@ -1028,7 +1231,13 @@ async function loadActivity(key) {
   S.activityKey = key;
   const data = await api("activity", { query: { key } });
   S.activity = data.activity;
+  if (key === "hub" && S.activity?.notify) S.hubNotify = S.activity.notify;
   return S.activity;
+}
+
+function hubNotifyMuted(key) {
+  const notify = S.hubNotify || (S.activityKey === "hub" ? S.activity?.notify : null);
+  return !!notify?.[key]?.mute;
 }
 
 async function activityAction(payload) {
@@ -1265,9 +1474,7 @@ function appendChatMessage(message) {
 }
 
 function chatScreen() {
-  return `${errorHtml()}
-    <p class="eyebrow">Chat</p>
-    <h2>${esc(partnerName())}</h2>
+  return `${errorHtml()}${screenBar(partnerName(), "Chat")}
     ${partnerStatusHtml()}
     <div id="msgs" class="msgs">${msgsHtml(S.chat)}</div>
     ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}`;
@@ -1278,15 +1485,14 @@ function notesHtml() {
   return S.notes.map((note) => `<article class="note" style="background:${NOTE_COLORS[note.color] || NOTE_COLORS.blush}">
       <div class="who">${esc(whoName(note.authorId))} · ${esc(dayLabel(note.createdAt))}</div>
       <p>${escBr(note.content)}</p>
+      <button class="text-btn" type="button" data-act="favorite" data-type="note" data-id="${note.id}" data-label="${esc(note.content.slice(0, 40).replace(/"/g, ""))}">★ Favorite</button>
       ${note.authorId === S.user.id ? `<button class="text-btn" type="button" data-act="delete-note" data-id="${note.id}">Remove</button>` : ""}
     </article>`).join("");
 }
 
 function notesScreen() {
   const swatches = Object.entries(NOTE_COLORS).map(([name, hex]) => `<button class="swatch ${S.noteColor === name ? "on" : ""}" type="button" style="background:${hex}" data-act="swatch" data-color="${name}" aria-label="${name}"></button>`).join("");
-  return `${errorHtml()}${flashHtml()}
-    <p class="eyebrow">Notes</p>
-    <h2>Leave something behind</h2>
+  return `${errorHtml()}${flashHtml()}${screenBar("Leave something behind", "Notes")}
     <form data-form="note" class="stack">
       <textarea name="content" maxlength="500" placeholder="A thought, a reminder, a little I love you"></textarea>
       <div class="swatches">${swatches}</div>
@@ -1333,6 +1539,7 @@ function momentCardHtml(moment) {
         <div class="moment-react-row">${reacts}</div>
         ${summary ? `<p class="moment-react-summary">${esc(summary)}</p>` : ""}
         ${commentBtn}
+        <button class="text-btn" type="button" data-act="favorite" data-type="moment" data-id="${moment.id}" data-label="${esc((moment.caption || "A moment").slice(0, 40).replace(/"/g, ""))}">★ Favorite</button>
       </div>
       ${thread}
       ${moment.authorId === S.user.id ? `<button class="text-btn" type="button" data-act="delete-moment" data-id="${moment.id}">Remove</button>` : ""}
@@ -1369,9 +1576,7 @@ async function momentReact(momentId, emoji) {
 }
 
 function momentsScreen() {
-  return `${errorHtml()}${flashHtml()}
-    <p class="eyebrow">Moments</p>
-    <h2>Photos for later</h2>
+  return `${errorHtml()}${flashHtml()}${screenBar("Photos for later", "Moments")}
     <form data-form="moment" class="stack">
       <input name="photo" type="file" accept="image/*" required>
       <input name="caption" maxlength="300" placeholder="Caption (optional)">
@@ -1391,6 +1596,21 @@ function gameStatus(game) {
     const p = game.partner;
     const partnerLine = p.won ? `${partnerName()} already won their board.` : `${partnerName()}: ${p.foundationCards} on foundations, ${p.stockLeft} cards left.`;
     return partnerLine;
+  }
+  if (game.type === "connect4") {
+    if (game.winner === "draw") return "Board full — it's a draw.";
+    if (game.winner) return game.winner === game.youAre ? "You connected four!" : `${partnerName()} won.`;
+    return game.yourTurn ? "Your turn — pick a column." : `Waiting for ${partnerName()}.`;
+  }
+  if (game.type === "memory") {
+    if (game.winner === "draw") return "It's a tie!";
+    if (game.winner) return String(game.winner) === String(S.user.id) ? "You matched the most!" : `${partnerName()} won.`;
+    return game.yourTurn ? "Flip two cards." : `Waiting for ${partnerName()}.`;
+  }
+  if (game.type === "hangman") {
+    if (game.winner === "guesser") return game.youAre === "guesser" ? "You guessed it!" : `${partnerName()} guessed your word.`;
+    if (game.winner === "setter") return game.youAre === "setter" ? "They ran out of guesses!" : "Out of guesses.";
+    return game.yourTurn ? "Your move." : `Waiting for ${partnerName()}.`;
   }
   if (game.type === "kahoot") {
     if (game.phase === "build") return game.youAreHost ? "You are hosting. Add questions, then start." : `Waiting for ${partnerName()} to start the quiz.`;
@@ -1436,9 +1656,7 @@ function solitaireInner(game) {
     }).join("");
     return `<button class="sol-col" type="button" data-act="sol-col" data-pile="${pi}">${cards || "<span class='sol-empty'></span>"}</button>`;
   }).join("");
-  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
-    <h2>Solitaire</h2>
-    <p>${esc(gameStatus(game))}</p>
+  return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
     <p class="empty">Your own Klondike board. ${you.moves} moves.</p>
     <div class="sol-board">
       <div class="sol-top">
@@ -1451,7 +1669,7 @@ function solitaireInner(game) {
         <button class="btn ghost" type="button" data-act="sol-waste-foundation" ${wasteTop ? "" : "disabled"}>Waste → foundation</button>
       </div>
     </div>
-    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">New deal</button></div>`;
+    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">New deal</button></div>`, game);
 }
 
 function kahootScoresHtml(game) {
@@ -1481,20 +1699,15 @@ function kahootInner(game) {
         <div class="row gap-top">${packs}<button class="btn ghost" type="button" data-act="kahoot-clear">Clear</button></div>
         <button class="btn rose gap-top" type="button" data-act="kahoot-start" ${game.questionCount ? "" : "disabled"}>Start quiz (${game.questionCount})</button>`
       : `<p class="empty">The host is building the quiz. Hang tight.</p>`;
-    return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
-      <h2>Kahoot</h2>
-      <p>${esc(gameStatus(game))}</p>
+    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
       ${scores}
       <ol class="kahoot-list">${list || "<li class='empty'>No questions yet.</li>"}</ol>
       ${host}
-      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Reset quiz</button></div>`;
+      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Reset quiz</button></div>`, game);
   }
   if (game.phase === "done") {
-    return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
-      <h2>Kahoot</h2>
-      <p>${esc(gameStatus(game))}</p>
-      ${scores}
-      <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Play again</button></div>`;
+    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
+      ${scores}`, game);
   }
   const q = game.currentQuestion;
   const colors = ["kahoot-a", "kahoot-b", "kahoot-c", "kahoot-d"];
@@ -1511,14 +1724,12 @@ function kahootInner(game) {
     reveal = `<p class="flash">${pts ? `+${pts} points` : "No points this time."}</p>`;
     if (game.youAreHost) reveal += `<button class="btn rose" type="button" data-act="kahoot-next">Next</button>`;
   }
-  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
-    <h2>Kahoot</h2>
-    <p>${esc(gameStatus(game))}</p>
+  return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
     ${scores}
     <p class="kahoot-q">${q ? esc(q.prompt) : ""}</p>
     <p class="empty">Question ${game.current + 1} of ${game.questionCount}</p>
     <div class="kahoot-grid">${choices}</div>
-    ${reveal}`;
+    ${reveal}`, game);
 }
 
 function pieceHtml(piece) {
@@ -1534,6 +1745,41 @@ function gameInner() {
   let board;
   if (game.type === "solitaire") return solitaireInner(game);
   if (game.type === "kahoot") return kahootInner(game);
+  if (game.type === "connect4") {
+    const cols = Array.from({ length: 7 }, (_, c) => `<button class="btn ghost c4-col" type="button" data-act="c4-drop" data-col="${c}" ${game.yourTurn && !game.winner ? "" : "disabled"}">↓</button>`).join("");
+    const cells = game.board.map((row) => row.map((cell) => {
+      const cls = cell === "red" ? "piece red" : cell === "black" ? "piece black" : "";
+      return `<div class="c4-slot">${cls ? `<span class="${cls}"></span>` : ""}</div>`;
+    }).join("")).join("");
+    return wrapGameBody(`<p>${esc(gameStatus(game))} You are ${game.youAre}.</p>
+      <div class="c4-cols">${cols}</div><div class="c4-board">${cells}</div>`, game);
+  }
+  if (game.type === "memory") {
+    const cards = game.cards.map((card, index) => {
+      const show = card.matched || card.up;
+      const label = show ? card.v : "";
+      const open = game.yourTurn && !game.winner && !card.matched && !card.up;
+      return `<button class="memory-card" type="button" data-act="memory-flip" data-i="${index}" ${open ? "" : "disabled"}>${label}</button>`;
+    }).join("");
+    return wrapGameBody(`<p>${esc(gameStatus(game))}</p>
+      <div class="memory-grid">${cards}</div>`, game);
+  }
+  if (game.type === "hangman") {
+    let play = "";
+    if (game.phase === "word" && game.youAre === "setter") {
+      play = `<form data-form="hangman-word" class="stack"><input name="word" maxlength="12" placeholder="Secret word" required><button class="btn rose" type="submit">Set word</button></form>`;
+    } else if (game.phase === "guess" && game.youAre === "guesser") {
+      const letters = "abcdefghijklmnopqrstuvwxyz".split("").map((ch) => {
+        const used = game.guessed.includes(ch);
+        return `<button class="btn ghost hang-letter" type="button" data-act="hangman-guess" data-letter="${ch}" ${used || game.winner ? "disabled" : ""}>${ch}</button>`;
+      }).join("");
+      play = `<p class="hang-mask">${esc(game.mask || "")}</p><p>Wrong: ${game.wrong}/6</p><div class="hang-letters">${letters}</div>`;
+    } else {
+      play = `<p class="hang-mask">${esc(game.mask || "····")}</p><p class="empty">Waiting for ${esc(partnerName())}…</p>`;
+    }
+    return wrapGameBody(`<p>${esc(gameStatus(game))} You are the ${game.youAre}.</p>${play}
+      ${game.word ? `<p>Word was: <strong>${esc(game.word)}</strong></p>` : ""}`, game);
+  }
   if (game.type === "tictactoe") {
     board = `<div class="ttt">${game.board.map((value, index) => {
       const open = game.yourTurn && game.legal.includes(index);
@@ -1565,29 +1811,30 @@ function gameInner() {
   }
   const title = game.type === "tictactoe" ? "Tic-tac-toe" : "Checkers";
   const label = game.type === "tictactoe" ? `You are ${game.youAre}.` : "";
-  return `<button class="text-btn" type="button" data-act="game-lobby">All games</button>
-    <h2>${title}</h2>
-    <p>${esc(gameStatus(game))} ${esc(label)}</p>
-    ${board}
-    <div class="row gap-top"><button class="btn ghost" type="button" data-act="reset-game">Play again</button></div>`;
+  return wrapGameBody(`<p>${esc(gameStatus(game))} ${esc(label)}</p>
+    ${board}`, game);
 }
 
 function gamesScreen() {
   if (!S.gameType || !S.game) {
-    return `${errorHtml()}
-      <p class="eyebrow">Games</p>
-      <h2>Pick a board</h2>
+    const actLink = (route, title, desc) => `<button class="game-card" type="button" data-act="go" data-route="${route}" data-back-games="1"><h3>${esc(title)}</h3><p>${esc(desc)}</p></button>`;
+    return `${errorHtml()}${screenBar("Pick a board", "Games")}
       <div class="game-list">
-        <button class="game-card" type="button" data-act="play" data-type="tictactoe"><h3>Tic-tac-toe</h3><p>Three in a row. The person who opened the bubble goes first.</p></button>
-        <button class="game-card" type="button" data-act="play" data-type="checkers"><h3>Checkers</h3><p>Coral moves first. If you can jump, you have to. Kings wear a gold ring.</p></button>
-        <button class="game-card" type="button" data-act="play" data-type="solitaire"><h3>Solitaire</h3><p>Your own Klondike board in the bubble. Race to clear the deck.</p></button>
-        <button class="game-card" type="button" data-act="play" data-type="kahoot"><h3>Kahoot</h3><p>Build a quiz together, then answer in sync for points.</p></button>
-        <button class="game-card" type="button" data-act="go" data-route="daily"><h3>Daily question</h3><p>One question a day — answers unlock together.</p></button>
-        <button class="game-card" type="button" data-act="go" data-route="wyr"><h3>Would you rather</h3><p>Quick rounds to see if you match.</p></button>
-        <button class="game-card" type="button" data-act="go" data-route="mood"><h3>Mood check-in</h3><p>Share how you feel today.</p></button>
+        ${gameLobbyCard("tictactoe", "Tic-tac-toe", "Three in a row. The person who opened the bubble goes first.")}
+        ${gameLobbyCard("checkers", "Checkers", "Coral moves first. If you can jump, you have to. Kings wear a gold ring.")}
+        ${gameLobbyCard("solitaire", "Solitaire", "Your own Klondike board in the bubble. Race to clear the deck.")}
+        ${gameLobbyCard("kahoot", "Kahoot", "Build a quiz together, then answer in sync for points.")}
+        ${actLink("daily", "Daily question", "One question a day — answers unlock together.")}
+        ${actLink("wyr", "Would you rather", "Quick rounds to see if you match.")}
+        ${actLink("mood", "Mood check-in", "Share how you feel today.")}
+        ${gameLobbyCard("connect4", "Connect Four", "Drop discs — four in a row wins.")}
+        ${gameLobbyCard("memory", "Memory match", "Find the pairs together.")}
+        ${gameLobbyCard("hangman", "Hangman", "One sets the word, one guesses.")}
       </div>`;
   }
-  return `${errorHtml()}<div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>`;
+  const title = gameTypeLabel(S.game.type);
+  return `${errorHtml()}${gameBarHtml(title)}${gameLeaveOverlayHtml()}
+    <div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>`;
 }
 
 function watchCommentsHtml() {
@@ -1606,10 +1853,8 @@ function watchCommentsHtml() {
 
 function watchScreen() {
   const vid = S.watch?.videoId;
-  return `${errorHtml()}${flashHtml()}
-    <p class="eyebrow">Watch together</p>
-    <h2>Press play for two</h2>
-    <p>Paste a YouTube link you both want to watch. Playback stays roughly in step. Comments on the right stay tied to this video.</p>
+  return `${errorHtml()}${flashHtml()}${screenBar("Press play for two", "Watch together")}
+    <p class="empty">Paste a YouTube link you both want to watch. Playback stays roughly in step. Comments on the right stay tied to this video.</p>
     <div class="watch-layout">
       <div class="watch-main">
         <form data-form="watch" class="stack">
@@ -1635,10 +1880,8 @@ function callActionsHtml() {
 }
 
 function callScreen() {
-  return `${errorHtml()}
-    <p class="eyebrow">Video call</p>
-    <h2>See ${esc(partnerName())}</h2>
-    <p>Stay on this page while you talk, with BuzzBuds open on both sides. Calls work well here on localhost. A public version later needs HTTPS.</p>
+  return `${errorHtml()}${screenBar(`See ${partnerName()}`, "Video call")}
+    <p class="empty">Stay on this page while you talk, with BuzzBuds open on both sides. Calls work well here on localhost. A public version later needs HTTPS.</p>
     <div class="call-stage">
       <video id="remote-video" class="remote" autoplay playsinline></video>
       <video id="local-video" class="local" autoplay playsinline muted></video>
@@ -1648,16 +1891,16 @@ function callScreen() {
 }
 
 function moreScreen() {
-  return `<p class="eyebrow">More</p><h2>The rest of the bubble</h2>
+  return `${screenBar("The rest of the bubble", "More")}
     <div class="game-list">
-      <button class="game-card" type="button" data-act="go" data-route="playlist"><h3>Playlist</h3><p>Shared songs and live reactions.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="draw"><h3>Drawing board</h3><p>Doodle together in real time.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="calendar"><h3>Calendar</h3><p>Dates, calls, and anniversaries.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="favorites"><h3>Favorites</h3><p>Jump to saved moments and notes.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="watch"><h3>Watch</h3><p>A YouTube video, in step.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="call"><h3>Video call</h3><p>See and hear each other.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="look"><h3>Look</h3><p>Theme, animations, and layout.</p></button>
-      <button class="game-card" type="button" data-act="go" data-route="profile"><h3>Profile</h3><p>Your name, username, and the door out.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="playlist" data-back-more="1"><h3>Playlist</h3><p>Shared songs and live reactions.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="draw" data-back-more="1"><h3>Drawing board</h3><p>Doodle together in real time.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="calendar" data-back-more="1"><h3>Calendar</h3><p>Dates, calls, and anniversaries.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="favorites" data-back-more="1"><h3>Favorites</h3><p>Jump to saved moments and notes.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="watch" data-back-more="1"><h3>Watch</h3><p>A YouTube video, in step.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="call" data-back-more="1"><h3>Video call</h3><p>See and hear each other.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="look" data-back-more="1"><h3>Look</h3><p>Theme, animations, and layout.</p></button>
+      <button class="game-card" type="button" data-act="go" data-route="profile" data-back-more="1"><h3>Profile</h3><p>Your name, username, and the door out.</p></button>
     </div>`;
 }
 
@@ -1727,7 +1970,23 @@ function lookScreen() {
     ${choiceGroup("Corners", "Round, softened, or square.", "corners", [["round", "Round"], ["soft", "Soft"], ["sharp", "Sharp"]])}
     ${choiceGroup("Width", "A focused column, or more room on a wide screen.", "span", [["focus", "Focus"], ["wide", "Wide"]])}
     ${choiceGroup("Notes", "A little tilt, or a straight board.", "notes", [["tilted", "Tilted"], ["flat", "Flat"]])}
-    ${choiceGroup("Animations", "Hearts, transitions, and little celebrations.", "animations", [["on", "On"], ["off", "Off"]])}`;
+    ${choiceGroup("Animations", "Hearts, transitions, and little celebrations.", "animations", [["on", "On"], ["off", "Off"]])}
+    ${notifyPrefsSection()}`;
+}
+
+function notifyPrefsSection() {
+  const notify = S.activity?.notify || {};
+  const rows = [
+    ["chat", "Chat messages"],
+    ["games", "Games & turns"],
+    ["daily", "Daily question"],
+    ["jar", "Love jar"],
+  ];
+  const buttons = rows.map(([key, label]) => {
+    const muted = notify[key]?.mute;
+    return `<button class="choice ${muted ? "on" : ""}" type="button" data-act="notify-toggle" data-key="${key}">${label} — ${muted ? "Muted" : "Sound on"}</button>`;
+  }).join("");
+  return `<section class="look-block"><h3>Activity alerts</h3><p class="empty">Per-bubble notification style (saved in your shared hub).</p><div class="choice-grid">${buttons}</div></section>`;
 }
 
 function screenFor(route) {
@@ -1906,6 +2165,8 @@ async function tick() {
       if (S.gameType) {
         await pullGame();
         if (S.route === "games") await pullGameComments();
+      } else {
+        await pullGamesTurnPing();
       }
       if (S.route === "watch") {
         await pullWatch();
@@ -1970,6 +2231,29 @@ async function pullMoments() {
   S.momentsReactSig = reactSig;
   paintMomentGrid();
   if (S.momentOpen) loadMomentComments(S.momentOpen).catch(() => {});
+}
+
+async function pullGamesTurnPing() {
+  if (!S.bubble || S.bubble.status !== "active" || S.gameType) return;
+  try {
+    const data = await api("games_list");
+    const rows = data.games || [];
+    const sig = rows.map((r) => `${r.type}:${r.yourTurn ? 1 : 0}`).join(",");
+    if (S.gamesTurnSig && sig !== S.gamesTurnSig) {
+      rows.forEach((r) => {
+        if (r.yourTurn && !S.gamesTurnSig.includes(`${r.type}:1`)) {
+          if (!hubNotifyMuted("games")) playTurnRing();
+          if (S.route !== "games" || S.gameType !== r.type) {
+            showFlash(`Your turn in ${gameTypeLabel(r.type)}.`);
+          }
+        }
+      });
+    }
+    S.gamesTurnSig = sig;
+    if (S.route === "games" && !S.gameType) S.gamesLobby = rows;
+  } catch {
+    /* ignore */
+  }
 }
 
 async function pullGame() {
@@ -2048,6 +2332,30 @@ async function kahootMove(payload) {
   });
   S.game = data.game;
   checkTurnNotify(S.game);
+  paintGame();
+  refreshState().catch(() => {});
+}
+
+async function playC4(col) {
+  const data = await api("game_move", {
+    method: "POST",
+    json: { type: "connect4", col, version: S.game.version },
+  });
+  S.game = data.game;
+  checkTurnNotify(S.game);
+  if (S.game.winner && S.game.winner !== "draw" && typeof BuzzMotion !== "undefined") BuzzMotion.confetti(28);
+  paintGame();
+  refreshState().catch(() => {});
+}
+
+async function playMemory(index) {
+  const data = await api("game_move", {
+    method: "POST",
+    json: { type: "memory", index, version: S.game.version },
+  });
+  S.game = data.game;
+  checkTurnNotify(S.game);
+  if (S.game.winner && typeof BuzzMotion !== "undefined") BuzzMotion.confetti(28);
   paintGame();
   refreshState().catch(() => {});
 }
@@ -2573,7 +2881,49 @@ async function onClick(event) {
   try {
     if (act === "go") {
       if (el.dataset.mode) S.authMode = el.dataset.mode;
-      await go(el.dataset.route, { force: el.dataset.route !== S.route || !!el.dataset.mode });
+      if (el.dataset.lobby) {
+        await go("games", { lobby: true, force: true, backTo: { route: "home" } });
+        return;
+      }
+      const route = el.dataset.route;
+      const opts = { force: route !== S.route || !!el.dataset.mode || !!el.dataset.lobby };
+      if (el.dataset.backGames) opts.backTo = { route: "games", lobby: true };
+      else if (el.dataset.backMore) opts.backTo = { route: "more" };
+      else if (el.dataset.backHome) opts.backTo = { route: "home" };
+      else if (["daily", "mood", "timeline", "playlist", "draw", "wyr", "bucket", "quiz", "scrapbook", "jar", "search", "calendar", "favorites"].includes(route)) {
+        opts.backTo = S.route === "games" && !S.gameType ? { route: "games", lobby: true } : { route: "home" };
+      }
+      await go(route, opts);
+      return;
+    }
+    if (act === "nav-back") {
+      if (S.route === "games" && S.gameType) await tryLeaveGame();
+      else navigateBack();
+      return;
+    }
+    if (act === "game-menu") {
+      if (S.game && clientGameInProgress(S.game) && !S.game.winner) {
+        S.uiGameMenu = true;
+        render();
+      } else await leaveGameLobby();
+      return;
+    }
+    if (act === "game-leave-pause") {
+      await leaveGameLobby();
+      return;
+    }
+    if (act === "game-leave-resign") {
+      await resignCurrentGame();
+      return;
+    }
+    if (act === "game-leave-stay") {
+      S.uiGameMenu = false;
+      render();
+      return;
+    }
+    if (act === "activity-chat-toggle") {
+      const layout = document.querySelector(".activity-layout");
+      if (layout) layout.classList.toggle("chat-open");
       return;
     }
     if (act === "auth-tab") {
@@ -2770,25 +3120,18 @@ async function onClick(event) {
       return;
     }
     if (act === "play") {
-      S.gameType = el.dataset.type;
+      const type = el.dataset.type;
       S.gameComments = [];
       S.gameCommentsSig = "";
       S.gameCommentsType = "";
       S.turnHadMine = undefined;
-      S.game = (await api("game", { query: { type: S.gameType } })).game;
-      S.selected = S.game.mustFrom || null;
       S.solSel = null;
-      checkTurnNotify(S.game);
-      render();
+      await go("games", { gameType: type, force: true, backTo: { route: "games", lobby: true }, skipBack: true });
       pullGameComments().catch(() => {});
       return;
     }
     if (act === "game-lobby") {
-      S.gameType = null;
-      S.game = null;
-      S.turnHadMine = undefined;
-      closeEmojiBars();
-      render();
+      await leaveGameLobby();
       return;
     }
     if (act === "reset-game") {
@@ -2838,6 +3181,65 @@ async function onClick(event) {
     if (act === "kahoot-start") return kahootMove({ action: "start" });
     if (act === "kahoot-next") return kahootMove({ action: "next" });
     if (act === "kahoot-answer") return kahootMove({ action: "answer", choice: Number(el.dataset.choice) });
+    if (act === "c4-drop") return playC4(Number(el.dataset.col));
+    if (act === "memory-flip") return playMemory(Number(el.dataset.i));
+    if (act === "quiz-guess") {
+      S.activityKey = "quiz";
+      await activityAction({ action: "guess", choice: Number(el.dataset.choice) });
+      render();
+      return;
+    }
+    if (act === "quiz-start") {
+      S.activityKey = "quiz";
+      await activityAction({ action: "start" });
+      render();
+      return;
+    }
+    if (act === "jar-open") {
+      S.activityKey = "jar";
+      await activityAction({ action: "open", id: Number(el.dataset.id) });
+      if (typeof BuzzMotion !== "undefined") BuzzMotion.heartBurst(5);
+      render();
+      return;
+    }
+    if (act === "scrap-sticker") {
+      S.scrapSticker = el.dataset.sticker || "📎";
+      const input = document.querySelector('form[data-form="activity-scrapbook"] input[name="sticker"]');
+      if (input) input.value = S.scrapSticker;
+      return;
+    }
+    if (act === "jar-sticker") {
+      S.jarSticker = el.dataset.sticker || "💌";
+      const input = document.querySelector('form[data-form="activity-jar"] input[name="sticker"]');
+      if (input) input.value = S.jarSticker;
+      return;
+    }
+    if (act === "notify-toggle") {
+      S.activityKey = "hub";
+      if (!S.activity) await loadActivity("hub");
+      const key = el.dataset.key;
+      const muted = !S.activity?.notify?.[key]?.mute;
+      await activityAction({ action: "notify", key, mute: muted, sound: !muted });
+      await loadActivity("hub");
+      render();
+      return;
+    }
+    if (act === "favorite") {
+      S.activityKey = "hub";
+      if (!S.activity) await loadActivity("hub");
+      await activityAction({
+        action: "favorite",
+        type: el.dataset.type,
+        id: Number(el.dataset.id),
+        label: el.dataset.label || el.dataset.type,
+      });
+      showFlash("Added to favorites.");
+      return;
+    }
+    if (act === "search-open") {
+      await go(el.dataset.route || "home", { force: true });
+      return;
+    }
     if (act === "ttt") return playTtt(Number(el.dataset.i));
     if (act === "pick") return pickSquare(Number(el.dataset.r), Number(el.dataset.c));
     if (act === "start-call") return startCall();
@@ -2848,6 +3250,16 @@ async function onClick(event) {
       S.incomingOffer = null;
       S.incomingBubbleId = null;
       if (bubbleId) await signalSend("hangup", {}, bubbleId);
+      return;
+    }
+    if (act === "hangman-guess") {
+      const data = await api("game_move", {
+        method: "POST",
+        json: { type: "hangman", version: S.game.version, action: "guess", letter: el.dataset.letter },
+      });
+      S.game = data.game;
+      if (S.game.winner && typeof BuzzMotion !== "undefined") BuzzMotion.confetti(24);
+      paintGame();
       return;
     }
     if (act === "hangup") return endCall(true);
@@ -2979,9 +3391,80 @@ async function onSubmit(event) {
       return;
     }
     if (kind === "activity-calendar") {
+      S.activityKey = "hub";
       await activityAction({ action: "calendar", title: fd.get("title"), at: fd.get("at"), kind: "date" });
       form.reset();
       render();
+      return;
+    }
+    if (kind === "hub-search") {
+      const q = String(fd.get("q") || "").trim();
+      const data = await api("search", { query: { q } });
+      S.searchResults = data.results || [];
+      S.backTo = { route: "home" };
+      await go("search", { force: true, backTo: { route: "home" } });
+      return;
+    }
+    if (kind === "activity-quiz") {
+      S.activityKey = "quiz";
+      await activityAction({
+        action: "add",
+        prompt: fd.get("prompt"),
+        choices: [fd.get("c0"), fd.get("c1"), fd.get("c2"), fd.get("c3")],
+        correct: Number(fd.get("correct")),
+      });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "activity-scrapbook") {
+      S.activityKey = "scrapbook";
+      await activityAction({
+        action: "page",
+        caption: fd.get("caption"),
+        body: fd.get("body"),
+        momentId: Number(fd.get("momentId") || 0),
+        sticker: fd.get("sticker") || S.scrapSticker,
+      });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "activity-jar") {
+      S.activityKey = "jar";
+      let voiceFile = "";
+      const voice = fd.get("voice");
+      if (voice && voice.size) {
+        const upload = new FormData();
+        upload.append("audio", voice);
+        const up = await api("jar_voice", { method: "POST", body: upload });
+        voiceFile = up.voiceFile || "";
+      }
+      const body = String(fd.get("body") || "").trim();
+      if (!body && !voiceFile) {
+        showError("Write a note or attach a voice clip.");
+        return;
+      }
+      let unlockAt = String(fd.get("unlockAt") || "").trim();
+      if (unlockAt) unlockAt = new Date(unlockAt).toISOString();
+      await activityAction({
+        action: "add",
+        body: body || "A voice note for you 💕",
+        unlockAt,
+        sticker: fd.get("sticker") || S.jarSticker,
+        voiceFile,
+      });
+      form.reset();
+      render();
+      return;
+    }
+    if (kind === "hangman-word") {
+      const data = await api("game_move", {
+        method: "POST",
+        json: { type: "hangman", version: S.game.version, action: "word", word: fd.get("word") },
+      });
+      S.game = data.game;
+      paintGame();
       return;
     }
     if (kind === "note") {
@@ -3114,8 +3597,12 @@ document.addEventListener("change", (event) => {
 });
 document.addEventListener("submit", onSubmit);
 window.addEventListener("hashchange", () => {
-  const hash = (location.hash || "#landing").slice(1);
-  if (hash !== S.route) go(hash);
+  const parsed = parseRouteHash(location.hash);
+  const current = routeHash(S.route, S.gameType);
+  const next = routeHash(parsed.route, parsed.gameType);
+  if (next === current && S.renderedRoute === parsed.route) return;
+  S.hashNav = true;
+  go(parsed.route, { gameType: parsed.gameType, fromHash: true, force: true, keepGame: true, skipBack: true });
 });
 
 async function boot() {
@@ -3125,8 +3612,9 @@ async function boot() {
   } catch (err) {
     S.bootError = err.message;
   }
-  const hash = location.hash.replace("#", "") || (S.user ? "home" : "landing");
-  await go(hash, { force: true });
+  const parsed = parseRouteHash(location.hash || (S.user ? "#home" : "#landing"));
+  S.hashNav = true;
+  await go(parsed.route, { gameType: parsed.gameType, fromHash: true, force: true, keepGame: true });
   if (!S.polling) S.polling = setInterval(() => { tick().catch(() => {}); }, 2000);
 }
 

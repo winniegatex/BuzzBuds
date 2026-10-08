@@ -982,6 +982,70 @@ body.is-navigating #screen::before {
 @media (max-width: 480px) {
   .hub-grid { grid-template-columns: 1fr; }
 }
+.sticker-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.sticker-pick { border: 0; background: var(--glass); border-radius: 12px; font-size: 22px; padding: 6px 10px; cursor: pointer; }
+.scrap-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 10px; }
+.scrap-page .sticker { font-size: 28px; }
+.c4-cols { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 420px; margin-bottom: 6px; }
+.c4-board { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; max-width: 420px; }
+.c4-slot { aspect-ratio: 1; background: color-mix(in srgb, var(--line) 50%, var(--card)); border-radius: 50%; display: grid; place-items: center; }
+.c4-slot .piece { width: 78%; aspect-ratio: 1; border-radius: 50%; }
+.memory-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; max-width: 360px; }
+.memory-card { aspect-ratio: 1; border: 0; border-radius: 14px; font-size: 28px; background: var(--glass); box-shadow: var(--shadow); }
+.hang-mask { font-family: var(--display); font-size: 32px; letter-spacing: 0.2em; }
+.hang-letters { display: flex; flex-wrap: wrap; gap: 4px; }
+.hang-letter { padding: 6px 10px; min-width: 36px; }
+.jar-note.sealed { opacity: 0.85; }
+.activity-bar {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius);
+  position: sticky;
+  top: 0;
+  z-index: 12;
+}
+.activity-bar-title { min-width: 0; text-align: center; }
+.activity-bar-title .eyebrow { display: block; margin: 0; font-size: 11px; }
+.activity-bar-title strong { font-family: var(--display); font-size: 1.05rem; }
+.bar-btn {
+  border: 0;
+  background: color-mix(in srgb, var(--glass) 80%, transparent);
+  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  font-size: 18px;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+.bar-btn:hover { filter: brightness(1.06); }
+.pill.turn { background: color-mix(in srgb, var(--rose) 35%, var(--glass)); }
+.game-leave-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+.game-leave-card { max-width: 360px; width: 100%; padding: 18px; border-radius: var(--radius); }
+.game-actions { flex-wrap: wrap; gap: 8px; }
+@media (max-width: 900px) {
+  .activity-layout .activity-chat { display: none; }
+  .activity-layout.chat-open .activity-chat {
+    display: block;
+    position: fixed;
+    inset: auto 12px 72px 12px;
+    max-height: 45vh;
+    z-index: 40;
+    overflow: auto;
+  }
+  .activity-layout.chat-open .activity-main { filter: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .note { transform: none !important; }

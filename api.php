@@ -29,6 +29,7 @@ match ($action) {
     'moment_image' => handle_moment_image(),
     'jar_audio' => handle_jar_audio(),
     'game' => handle_game(),
+    'games_list' => handle_games_list(),
     'game_move' => handle_game_move(),
     'game_reset' => handle_game_reset(),
     'watch' => handle_watch(),
@@ -739,6 +740,42 @@ function handle_game(): void
     json_ok(['game' => present_game($type, $state, $version, (int) $user['id'])]);
 }
 
+function handle_games_list(): void
+{
+    $user = require_user();
+    $bubble = require_active_bubble($user);
+    $uid = (int) $user['id'];
+    $db = db();
+    $rows = [];
+    foreach (game_types_all() as $type) {
+        $row = find_game($db, (int) $bubble['id'], $type);
+        if (!$row) {
+            continue;
+        }
+        $state = json_decode((string) $row['state_json'], true);
+        if (!is_array($state)) {
+            continue;
+        }
+        $version = (int) $row['version'];
+        $view = present_game($type, $state, $version, $uid);
+        $inProgress = game_in_progress($type, $state);
+        $status = '';
+        if (!empty($view['winner'])) {
+            $status = 'Finished';
+        } elseif ($inProgress) {
+            $status = !empty($view['yourTurn']) ? 'Your turn' : 'In progress';
+        }
+        $rows[] = [
+            'type' => $type,
+            'inProgress' => $inProgress,
+            'yourTurn' => !empty($view['yourTurn']),
+            'status' => $status,
+            'version' => $version,
+        ];
+    }
+    json_ok(['games' => $rows]);
+}
+
 function handle_game_move(): void
 {
     require_mutation();
@@ -754,7 +791,9 @@ function handle_game_move(): void
         if ((int) ($data['version'] ?? -1) !== $version) {
             throw new UserError('Your partner just moved. Have another look.');
         }
-        if ($type === 'tictactoe') {
+        if (($data['action'] ?? '') === 'resign') {
+            $state = game_resign($type, $state, (int) $user['id']);
+        } elseif ($type === 'tictactoe') {
             $state = ttt_apply($state, (int) $user['id'], (int) ($data['index'] ?? -1));
         } elseif ($type === 'checkers') {
             $from = $data['from'] ?? null;

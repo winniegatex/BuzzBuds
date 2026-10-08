@@ -23,7 +23,7 @@ function c4_drop(array $state, int $col): array
         if ($state['board'][$r][$col] === null) {
             $state['board'][$r][$col] = $state['turn'];
             $state['lastCol'] = $col;
-            $state['winner'] = c4_winner($state['board'], $r, $col) ?: c4_full($state['board']) ? 'draw' : null;
+            $state['winner'] = c4_winner($state['board'], $r, $col) ?: (c4_full($state['board']) ? 'draw' : null);
             if ($state['winner'] === null) {
                 $state['turn'] = $state['turn'] === 'red' ? 'black' : 'red';
             }

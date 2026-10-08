@@ -274,3 +274,100 @@ function checkers_apply(array $state, int $userId, int $fr, int $fc, int $tr, in
     }
     return $state;
 }
+
+function game_types_all(): array
+{
+    return ['tictactoe', 'checkers', 'solitaire', 'kahoot', 'connect4', 'memory', 'hangman'];
+}
+
+function game_in_progress(string $type, array $state): bool
+{
+    if ($type === 'tictactoe') {
+        if (!empty($state['winner'])) {
+            return false;
+        }
+        foreach ($state['board'] ?? [] as $cell) {
+            if ($cell !== null) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if ($type === 'checkers') {
+        return empty($state['winner']) && !empty($state['lastMove']);
+    }
+    if ($type === 'connect4') {
+        if (!empty($state['winner'])) {
+            return false;
+        }
+        foreach ($state['board'] ?? [] as $row) {
+            foreach ($row as $cell) {
+                if ($cell !== null) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    if ($type === 'memory') {
+        if (!empty($state['winner'])) {
+            return false;
+        }
+        foreach ($state['cards'] ?? [] as $c) {
+            if (!empty($c['matched']) || !empty($c['up'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if ($type === 'hangman') {
+        if (!empty($state['winner'])) {
+            return false;
+        }
+        return ($state['phase'] ?? '') === 'guess' || ($state['word'] ?? '') !== '';
+    }
+    if ($type === 'kahoot') {
+        $phase = (string) ($state['phase'] ?? 'build');
+        return !in_array($phase, ['build', 'done'], true);
+    }
+    if ($type === 'solitaire') {
+        foreach ($state['players'] ?? [] as $p) {
+            if ((int) ($p['moves'] ?? 0) > 0 || !empty($p['won'])) {
+                return true;
+            }
+        }
+        return false;
+    }
+    return false;
+}
+
+function game_resign(string $type, array $state, int $uid): array
+{
+    if (!game_in_progress($type, $state)) {
+        return $state;
+    }
+    if ($type === 'tictactoe') {
+        $you = ((int) $state['xUser'] === $uid) ? 'X' : 'O';
+        $state['winner'] = $you === 'X' ? 'O' : 'X';
+        return $state;
+    }
+    if ($type === 'checkers' || $type === 'connect4') {
+        $you = ((int) $state['redUser'] === $uid) ? 'red' : 'black';
+        $state['winner'] = $you === 'red' ? 'black' : 'red';
+        return $state;
+    }
+    if ($type === 'memory') {
+        $other = (int) $state['userA'] === $uid ? (int) $state['userB'] : (int) $state['userA'];
+        $state['winner'] = (string) $other;
+        return $state;
+    }
+    if ($type === 'hangman') {
+        $state['winner'] = (int) $state['setter'] === $uid ? 'guesser' : 'setter';
+        return $state;
+    }
+    if ($type === 'kahoot') {
+        $state['phase'] = 'done';
+        return $state;
+    }
+    throw new UserError('That game cannot be resigned — just leave and come back.');
+}
