@@ -77,6 +77,13 @@ const S = {
   gamesTurnSig: "",
   uiGameMenu: false,
   hashNav: false,
+  resetStep: "",
+  resetEmail: "",
+  resetMask: "",
+  resetToken: "",
+  resetExpiresAt: 0,
+  resetCooldownUntil: 0,
+  resetTick: 0,
 };
 
 const GAME_TYPES = new Set(["tictactoe", "checkers", "solitaire", "kahoot", "connect4", "memory", "hangman"]);
@@ -1175,8 +1182,12 @@ function friendlyAuthError(message) {
   const map = [
     [/valid email|email looks/i, "That email looks off."],
     [/already registered/i, "That email already has a bubble — try signing in."],
-    [/does not match|password/i, "Email or password doesn’t match."],
+    [/does not match/i, "Email or password doesn’t match."],
+    [/at least 8/i, "Use at least 8 characters for your password."],
     [/at least 6/i, "Use at least 6 characters for your password."],
+    [/expired/i, "That code has expired. Send a new one."],
+    [/too many/i, "Too many tries. Send a new code."],
+    [/isn.t right|isn't right/i, "That code isn’t right, try again."],
   ];
   for (const [re, copy] of map) {
     if (re.test(raw)) return copy;
@@ -1197,12 +1208,176 @@ function syncAuthSubmitState() {
   const form = document.getElementById("auth-form");
   const btn = form?.querySelector('[type="submit"]');
   if (!form || !btn) return;
-  const ok = authValid(form);
+  let ok = false;
+  if (form.dataset.form === "forgot") {
+    ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(form.email?.value || "").trim());
+  } else if (form.dataset.form === "verify-code") {
+    ok = collectResetCode().length === 6;
+  } else if (form.dataset.form === "reset-password") {
+    const a = String(form.password?.value || "");
+    const b = String(form.passwordConfirm?.value || "");
+    ok = a.length >= 8 && a === b;
+  } else {
+    ok = authValid(form);
+  }
   btn.disabled = !ok || btn.classList.contains("is-loading");
   btn.classList.toggle("is-ready", ok && !btn.classList.contains("is-loading"));
 }
 
+function collectResetCode() {
+  return Array.from(document.querySelectorAll(".code-box")).map((el) => el.value.replace(/\D/g, "")).join("").slice(0, 6);
+}
+
+function maskResetEmail(email) {
+  const at = email.indexOf("@");
+  if (at < 1) return "***";
+  return `${email.slice(0, 1)}***${email.slice(at)}`;
+}
+
+function passwordStrengthHint(pw) {
+  if (pw.length < 8) return "Use at least 8 characters.";
+  if (pw.length < 10) return "Getting there — a little longer is nicer.";
+  if (!/[0-9]/.test(pw) || !/[A-Za-z]/.test(pw)) return "Stronger with letters and a number.";
+  return "Looks good.";
+}
+
+function resetCountdownLabel() {
+  const left = Math.max(0, Math.floor((S.resetExpiresAt - Date.now()) / 1000));
+  const m = Math.floor(left / 60);
+  const s = String(left % 60).padStart(2, "0");
+  return left > 0 ? `${m}:${s} left` : "Code expired";
+}
+
+function resetCooldownLeft() {
+  return Math.max(0, Math.ceil((S.resetCooldownUntil - Date.now()) / 1000));
+}
+
+function wireResetCodeBoxes() {
+  const boxes = Array.from(document.querySelectorAll(".code-box"));
+  if (!boxes.length) return;
+  boxes.forEach((box, i) => {
+    box.addEventListener("input", () => {
+      const v = box.value.replace(/\D/g, "").slice(-1);
+      box.value = v;
+      if (v && boxes[i + 1]) boxes[i + 1].focus();
+      syncAuthSubmitState();
+    });
+    box.addEventListener("keydown", (ev) => {
+      if (ev.key === "Backspace" && !box.value && boxes[i - 1]) {
+        boxes[i - 1].focus();
+      }
+    });
+    box.addEventListener("paste", (ev) => {
+      const text = (ev.clipboardData?.getData("text") || "").replace(/\D/g, "").slice(0, 6);
+      if (!text) return;
+      ev.preventDefault();
+      text.split("").forEach((ch, idx) => {
+        if (boxes[idx]) boxes[idx].value = ch;
+      });
+      boxes[Math.min(text.length, 5)].focus();
+      syncAuthSubmitState();
+    });
+  });
+  boxes[0].focus();
+}
+
+function startResetTicker() {
+  if (S.resetTick) window.clearInterval(S.resetTick);
+  S.resetTick = window.setInterval(() => {
+    if (S.route !== "auth" || !S.resetStep) {
+      window.clearInterval(S.resetTick);
+      S.resetTick = 0;
+      return;
+    }
+    const cd = document.getElementById("reset-countdown");
+    if (cd) cd.textContent = resetCountdownLabel();
+    const resend = document.getElementById("resend-code");
+    if (resend) {
+      const wait = resetCooldownLeft();
+      resend.disabled = wait > 0;
+      resend.textContent = wait > 0 ? `Resend code (${wait}s)` : "Resend code";
+    }
+  }, 1000);
+}
+
+function resetScreen() {
+  const step = S.resetStep;
+  const backBtn = `<button class="btn ghost auth-back" type="button" data-act="reset-back">← Back</button>`;
+  const toSignIn = `<p class="auth-forgot"><button class="text-btn" type="button" data-act="auth-tab" data-mode="login">Back to sign in</button></p>`;
+  if (step === "request") {
+    return `<div class="auth-wrap">
+      ${backBtn}
+      <div class="auth-card">
+        <div class="brand brand-center">${mark("full")}</div>
+        <h1 class="auth-headline">Reset your password</h1>
+        <p class="auth-sub">We’ll email a 6-digit code if that address has a bubble.</p>
+        ${errorHtml()}${flashHtml()}
+        <form id="auth-form" data-form="forgot" class="stack" novalidate>
+          <div class="field icon-field">
+            <label for="email">Email</label>
+            ${fieldIcon("mail")}
+            <input id="email" name="email" type="email" required autocomplete="email" placeholder="you@example.com" value="${esc(S.resetEmail)}">
+            <p class="field-hint" data-hint="email" hidden></p>
+          </div>
+          <button class="btn rose auth-submit" type="submit" disabled>Send me a code</button>
+        </form>
+        ${toSignIn}
+      </div>
+    </div>`;
+  }
+  if (step === "verify") {
+    const boxes = Array.from({ length: 6 }, (_, i) => `<input class="code-box" inputmode="numeric" pattern="[0-9]*" maxlength="1" autocomplete="${i === 0 ? "one-time-code" : "off"}" aria-label="Digit ${i + 1}">`).join("");
+    const wait = resetCooldownLeft();
+    return `<div class="auth-wrap">
+      ${backBtn}
+      <div class="auth-card">
+        <div class="brand brand-center">${mark("full")}</div>
+        <h1 class="auth-headline">Enter your code</h1>
+        <p class="auth-sub">Code sent to ${esc(S.resetMask || maskResetEmail(S.resetEmail))}</p>
+        <p class="auth-username-note" id="reset-countdown">${esc(resetCountdownLabel())}</p>
+        ${errorHtml()}${flashHtml()}
+        <form id="auth-form" data-form="verify-code" class="stack" novalidate>
+          <div class="code-row">${boxes}</div>
+          <p class="field-hint" data-hint="code" hidden></p>
+          <button class="btn rose auth-submit" type="submit" disabled>Verify code</button>
+        </form>
+        <p class="auth-forgot"><button class="text-btn" type="button" data-act="resend-code" id="resend-code" ${wait > 0 ? "disabled" : ""}>${wait > 0 ? `Resend code (${wait}s)` : "Resend code"}</button></p>
+        ${toSignIn}
+      </div>
+    </div>`;
+  }
+  return `<div class="auth-wrap">
+    ${backBtn}
+    <div class="auth-card">
+      <div class="brand brand-center">${mark("full")}</div>
+      <h1 class="auth-headline">Choose a new password</h1>
+      <p class="auth-sub">Use at least 8 characters. Then you’re back in.</p>
+      ${errorHtml()}${flashHtml()}
+      <form id="auth-form" data-form="reset-password" class="stack" novalidate>
+        <div class="field icon-field">
+          <label for="password">New password</label>
+          ${fieldIcon("lock")}
+          <input id="password" name="password" type="password" minlength="8" required autocomplete="new-password" placeholder="At least 8 characters">
+          <button class="pw-toggle" type="button" data-act="toggle-password" aria-label="Show password">Show</button>
+          <p class="field-hint" data-hint="password" hidden></p>
+          <p class="auth-username-note" id="pw-strength"></p>
+        </div>
+        <div class="field icon-field">
+          <label for="passwordConfirm">Confirm password</label>
+          ${fieldIcon("lock")}
+          <input id="passwordConfirm" name="passwordConfirm" type="password" minlength="8" required autocomplete="new-password" placeholder="Type it again">
+          <button class="pw-toggle" type="button" data-act="toggle-password" data-for="passwordConfirm" aria-label="Show password">Show</button>
+          <p class="field-hint" data-hint="confirm" hidden></p>
+        </div>
+        <button class="btn rose auth-submit" type="submit" disabled>Update password</button>
+      </form>
+      ${toSignIn}
+    </div>
+  </div>`;
+}
+
 function authScreen() {
+  if (S.resetStep) return resetScreen();
   const register = S.authMode !== "login";
   const nameField = register
     ? `<div class="field icon-field">
@@ -2223,7 +2398,13 @@ function render() {
 }
 
 function afterRender() {
-  if (S.route === "auth") syncAuthSubmitState();
+  if (S.route === "auth") {
+    syncAuthSubmitState();
+    if (S.resetStep === "verify") {
+      wireResetCodeBoxes();
+      startResetTicker();
+    }
+  }
   const list = document.getElementById("msgs");
   if (list) list.scrollTop = list.scrollHeight;
   const watchList = document.getElementById("watch-msgs");
@@ -3039,11 +3220,14 @@ async function onClick(event) {
     if (act === "auth-tab") {
       S.authMode = el.dataset.mode;
       S.error = "";
+      S.resetStep = "";
+      S.resetToken = "";
       render();
       return;
     }
     if (act === "toggle-password") {
-      const input = document.getElementById("password");
+      const id = el.dataset.for || "password";
+      const input = document.getElementById(id);
       if (!input) return;
       const show = input.type === "password";
       input.type = show ? "text" : "password";
@@ -3052,7 +3236,34 @@ async function onClick(event) {
       return;
     }
     if (act === "forgot-password") {
-      showFlash("Password reset isn’t in this version yet. If you’re stuck, create a note with your partner or try the email you used to sign up.");
+      S.resetStep = "request";
+      S.resetEmail = document.getElementById("email")?.value || S.resetEmail || "";
+      S.error = "";
+      S.flash = "";
+      render();
+      return;
+    }
+    if (act === "reset-back") {
+      if (S.resetStep === "new") S.resetStep = "verify";
+      else if (S.resetStep === "verify") S.resetStep = "request";
+      else {
+        S.resetStep = "";
+        S.authMode = "login";
+      }
+      S.error = "";
+      render();
+      return;
+    }
+    if (act === "resend-code") {
+      if (resetCooldownLeft() > 0) return;
+      el.classList.add("is-loading");
+      el.disabled = true;
+      const data = await api("forgot_password", { method: "POST", json: { email: S.resetEmail } });
+      S.resetMask = data.masked || maskResetEmail(S.resetEmail);
+      S.resetExpiresAt = Date.now() + (data.expiresIn || 600) * 1000;
+      S.resetCooldownUntil = Date.now() + (data.cooldown || 60) * 1000;
+      showFlash(data.message || "If that email is registered, a code is on its way.");
+      render();
       return;
     }
     if (act === "copy-user") return copyUsername();
@@ -3424,9 +3635,76 @@ async function onSubmit(event) {
   const kind = form.dataset.form;
   const fd = new FormData(form);
   const button = form.querySelector('[type="submit"]');
-  if (button && kind !== "register" && kind !== "login") button.disabled = true;
+  if (button && !["register", "login", "forgot", "verify-code", "reset-password"].includes(kind)) button.disabled = true;
   showError("");
   try {
+    if (kind === "forgot") {
+      const email = String(fd.get("email") || "").trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        const hint = form.querySelector('[data-hint="email"]');
+        if (hint) { hint.hidden = false; hint.textContent = "That email looks off."; }
+        return;
+      }
+      if (button) { button.classList.add("is-loading"); button.disabled = true; }
+      const data = await api("forgot_password", { method: "POST", json: { email } });
+      S.resetEmail = email;
+      S.resetMask = data.masked || maskResetEmail(email);
+      S.resetStep = "verify";
+      S.resetExpiresAt = Date.now() + (data.expiresIn || 600) * 1000;
+      S.resetCooldownUntil = Date.now() + (data.cooldown || 60) * 1000;
+      S.flash = data.message || "If that email is registered, a code is on its way.";
+      S.error = "";
+      render();
+      return;
+    }
+    if (kind === "verify-code") {
+      const code = collectResetCode();
+      const hint = form.querySelector('[data-hint="code"]');
+      if (code.length !== 6) {
+        if (hint) { hint.hidden = false; hint.textContent = "Enter all 6 digits."; }
+        return;
+      }
+      if (button) { button.classList.add("is-loading"); button.disabled = true; }
+      try {
+        const data = await api("verify_reset_code", { method: "POST", json: { email: S.resetEmail, code } });
+        S.resetToken = data.resetToken;
+        S.resetStep = "new";
+        S.error = "";
+        render();
+      } catch (err) {
+        const msg = friendlyAuthError(err.message);
+        if (hint) { hint.hidden = false; hint.textContent = msg; }
+        else showError(msg);
+      }
+      return;
+    }
+    if (kind === "reset-password") {
+      const password = String(fd.get("password") || "");
+      const confirm = String(fd.get("passwordConfirm") || "");
+      const passHint = form.querySelector('[data-hint="password"]');
+      const confHint = form.querySelector('[data-hint="confirm"]');
+      if (password.length < 8) {
+        if (passHint) { passHint.hidden = false; passHint.textContent = "Use at least 8 characters for your password."; }
+        return;
+      }
+      if (password !== confirm) {
+        if (confHint) { confHint.hidden = false; confHint.textContent = "Those passwords don’t match."; }
+        return;
+      }
+      if (button) { button.classList.add("is-loading"); button.disabled = true; }
+      const data = await api("reset_password", { method: "POST", json: { resetToken: S.resetToken, password, passwordConfirm: confirm } });
+      S.resetStep = "";
+      S.resetToken = "";
+      S.flash = "Password updated. Welcome back ♥";
+      if (data.user) {
+        await refreshState();
+        await go(S.bubble?.status === "active" ? "home" : "bubbles", { force: true, keepFlash: true });
+      } else {
+        S.authMode = "login";
+        render();
+      }
+      return;
+    }
     if (kind === "register" || kind === "login") {
       const email = String(fd.get("email") || "").trim();
       const password = String(fd.get("password") || "");
@@ -3743,7 +4021,8 @@ async function onSubmit(event) {
   } finally {
     if (button && button.isConnected) {
       button.classList.remove("is-loading");
-      button.disabled = kind === "register" || kind === "login" ? !authValid(form) : false;
+      if (["register", "login", "forgot", "verify-code", "reset-password"].includes(kind)) syncAuthSubmitState();
+      else button.disabled = false;
     }
   }
 }
@@ -3757,6 +4036,9 @@ document.addEventListener("input", (event) => {
   if (event.target.closest("#auth-form")) {
     const hint = event.target.closest(".field")?.querySelector(".field-hint");
     if (hint) { hint.hidden = true; hint.textContent = ""; }
+    const strength = document.getElementById("pw-strength");
+    const pw = document.getElementById("password");
+    if (strength && pw && event.target === pw) strength.textContent = passwordStrengthHint(pw.value);
     syncAuthSubmitState();
   }
   const input = event.target.closest("[data-look-color]");

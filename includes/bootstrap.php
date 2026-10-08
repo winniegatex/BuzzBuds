@@ -66,6 +66,32 @@ function start_session(): void
     }
 }
 
+function enforce_session_epoch(): void
+{
+    $uid = session_uid();
+    if ($uid <= 0) {
+        return;
+    }
+    $reopen = session_status() !== PHP_SESSION_ACTIVE;
+    if ($reopen) {
+        session_start();
+    }
+    $epoch = (int) ($_SESSION['session_epoch'] ?? 0);
+    $stmt = db()->prepare('SELECT session_epoch FROM users WHERE id = ?');
+    $stmt->execute([$uid]);
+    $row = $stmt->fetch();
+    $current = $row ? (int) ($row['session_epoch'] ?? 1) : 0;
+    if ($epoch > 0 && $current > 0 && $epoch !== $current) {
+        $GLOBALS['BUZZ_UID'] = 0;
+        $_SESSION = [];
+        session_write_close();
+        return;
+    }
+    if ($reopen) {
+        session_write_close();
+    }
+}
+
 function session_uid(): int
 {
     return (int) ($GLOBALS['BUZZ_UID'] ?? 0);
@@ -78,6 +104,16 @@ function set_uid(int $id): void
     }
     session_regenerate_id(true);
     $_SESSION['uid'] = $id;
+    $epoch = 1;
+    try {
+        $stmt = db()->prepare('SELECT session_epoch FROM users WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        $epoch = $row ? (int) ($row['session_epoch'] ?? 1) : 1;
+    } catch (Throwable) {
+        $epoch = 1;
+    }
+    $_SESSION['session_epoch'] = $epoch;
     $GLOBALS['BUZZ_UID'] = $id;
     session_write_close();
 }
@@ -273,6 +309,33 @@ SQL);
     if ($bubbleCols !== [] && !in_array('next_visit_at', $bubbleCols, true)) {
         $pdo->exec('ALTER TABLE bubbles ADD COLUMN next_visit_at TEXT');
     }
+    $userCols = [];
+    foreach ($pdo->query('PRAGMA table_info(users)')->fetchAll() as $col) {
+        $userCols[] = $col['name'];
+    }
+    if ($userCols !== [] && !in_array('session_epoch', $userCols, true)) {
+        $pdo->exec('ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 1');
+    }
+    $pdo->exec(<<<'SQL'
+CREATE TABLE IF NOT EXISTS password_resets (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  code_hash TEXT NOT NULL,
+  token_hash TEXT,
+  expires_at INTEGER NOT NULL,
+  token_expires_at INTEGER,
+  used INTEGER NOT NULL DEFAULT 0,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id, used, expires_at);
+CREATE TABLE IF NOT EXISTS auth_rate_limits (
+  bucket TEXT NOT NULL,
+  window_start INTEGER NOT NULL,
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (bucket, window_start)
+);
+SQL);
     $pdo->exec(<<<'SQL'
 CREATE TABLE IF NOT EXISTS bubble_presence (
   bubble_id INTEGER NOT NULL,
@@ -645,3 +708,6 @@ function note_colors(): array
 start_session();
 require_once __DIR__ . '/games.php';
 require_once __DIR__ . '/activities.php';
+require_once __DIR__ . '/mail.php';
+require_once __DIR__ . '/password_reset.php';
+enforce_session_epoch();

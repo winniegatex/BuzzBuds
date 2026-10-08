@@ -308,6 +308,19 @@ body.brand-shell.theme-dark.auth-glow {
   gap: 8px;
   margin-top: 18px;
 }
+.code-row { display: flex; gap: 8px; justify-content: center; }
+.code-box {
+  width: 44px;
+  height: 52px;
+  text-align: center;
+  font-size: 22px;
+  font-weight: 800;
+  border-radius: 14px;
+  border: 1px solid #f3c5cf;
+  color: #4A1038;
+  background: #fff;
+}
+.code-box:focus { outline: none; border-color: #F55F73; box-shadow: 0 0 0 3px color-mix(in srgb, #F55F73 28%, transparent); }
 .auth-features span {
   background: color-mix(in srgb, #fff 16%, transparent);
   color: #FDE0E3;
