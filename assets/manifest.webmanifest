@@ -1,18 +1,16 @@
 {
   "name": "BuzzBuds",
   "short_name": "BuzzBuds",
-  "description": "A private bubble for two people in different places.",
+  "description": "A private bubble for two, however far apart. Chat, watch together, play games, and share moments.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#241610",
-  "theme_color": "#241610",
+  "background_color": "#FDE0E3",
+  "theme_color": "#4A1038",
   "icons": [
-    {
-      "src": "icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    }
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-180.png", "sizes": "180x180", "type": "image/png", "purpose": "any" }
   ]
 }

@@ -51,7 +51,7 @@ const S = {
   activityComments: {},
   activityCommentsSig: {},
   timelineFeed: null,
-  drawColor: "#e85d6f",
+  drawColor: "#F55F73",
   drawStrokes: [],
   searchResults: [],
   scrapSticker: "📎",
@@ -362,7 +362,7 @@ function pingTyping() {
 
 function gameCommentsHtml() {
   if (!S.gameComments.length) {
-    return `<p class="empty">Cheer them on — the thread's quiet.</p>`;
+    return `<div class="empty empty-illo">${mascotHtml("wait")}<p>No messages yet. Say hi — they'll see it here.</p></div>`;
   }
   return S.gameComments.map((comment) => {
     const mine = comment.senderId === S.user.id;
@@ -431,18 +431,29 @@ function partnerStatusHtml() {
   return `<p id="partner-status" class="partner-status ${online ? "online" : ""} ${typing ? "typing" : ""}"><span class="status-dot" aria-hidden="true"></span>${esc(label)}</p>`;
 }
 
-function intimacyBarHtml() {
-  if (!S.bubble || S.bubble.status !== "active") return "";
+function hubHeroHtml() {
+  if (!S.bubble || S.bubble.status !== "active" || !S.user) return "";
+  const me = S.user.displayName || "You";
+  const them = partnerName();
   const visit = visitCountdownLabel(S.bubble.nextVisitAt);
-  return `<div class="intimacy-bar glass">
-    <div class="intimacy-stat"><span class="label">Together</span><strong>${esc(daysTogetherLabel(S.bubble))}</strong></div>
-    ${visit ? `<div class="intimacy-stat"><span class="label">Next visit</span><strong>${esc(visit)}</strong></div>` : `<div class="intimacy-stat"><span class="label">Next visit</span><strong class="empty">Set a date below</strong></div>`}
-    <button class="btn rose" type="button" data-act="thinking">Thinking of you</button>
-    <form data-form="visit" class="visit-form row">
-      <input type="date" name="nextVisit" value="${esc(S.bubble.nextVisitAt || "")}" aria-label="Next visit">
-      <button class="btn ghost" type="submit">Save</button>
+  return `<section class="hub-hero glass">
+    <div class="hub-hero-bg" aria-hidden="true"></div>
+    <div class="hub-hero-pair">
+      <div class="hub-ava-wrap">${ava(me)}<span class="hub-ava-name">${esc(me.split(" ")[0] || "You")}</span></div>
+      <div class="hub-hero-heart" aria-hidden="true"><span class="heart-line"></span><span class="heart-pulse">♥</span></div>
+      <div class="hub-ava-wrap">${ava(them)}<span class="hub-ava-name">${esc(them.split(" ")[0] || "Them")}</span></div>
+    </div>
+    <p class="hub-hero-days">${esc(daysTogetherLabel(S.bubble))}</p>
+    <p class="hub-hero-visit">${visit ? esc(visit) : "Set your next visit date below"}</p>
+    <div class="hub-hero-actions row">
+      <button class="btn rose" type="button" data-act="thinking">Thinking of you</button>
+      <button class="btn soft" type="button" data-act="go" data-route="call">Video call</button>
+    </div>
+    <form data-form="visit" class="visit-form row hub-hero-visit">
+      <input type="date" name="nextVisit" value="${esc(S.bubble.nextVisitAt || "")}" aria-label="Next visit date">
+      <button class="btn ghost" type="submit">Save visit</button>
     </form>
-  </div>`;
+  </section>`;
 }
 
 function paintPartnerStatus() {
@@ -467,8 +478,15 @@ function dayLabel(iso) {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function mark() {
-  return `<svg class="mark" viewBox="0 0 48 48" aria-hidden="true"><circle cx="20" cy="24" r="12" fill="#ffd0c6"/><circle cx="30" cy="24" r="12" fill="none" stroke="#e25b45" stroke-width="2.5"/></svg>`;
+function mark(kind = "icon") {
+  if (kind === "full") {
+    return `<span class="brand-lockup full"><img class="logo-full" src="assets/logo.png" alt="BuzzBuds" width="220" height="220"></span>`;
+  }
+  return `<span class="brand-lockup"><img class="mark" src="assets/icon.svg" alt="" width="36" height="36"><span class="wordmark">BuzzBuds</span></span>`;
+}
+
+function mascotHtml(mood = "idle") {
+  return `<span class="mascot mascot-${mood}" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span>`;
 }
 
 function icon(name) {
@@ -489,7 +507,8 @@ function icon(name) {
 }
 
 function errorHtml() {
-  return `<p class="error" data-error ${S.error ? "" : "hidden"}>${esc(S.error)}</p>`;
+  if (!S.error) return `<p class="error" data-error hidden></p>`;
+  return `<div class="error error-mascot" data-error>${mascotHtml("sleepy")}<p>${esc(S.error)}</p></div>`;
 }
 
 function flashHtml() {
@@ -503,8 +522,13 @@ function showError(message) {
     if (message) render();
     return;
   }
-  el.hidden = !message;
-  el.textContent = message || "";
+  if (!message) {
+    el.hidden = true;
+    el.textContent = "";
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = `${mascotHtml("sleepy")}<p>${esc(message)}</p>`;
 }
 
 function showFlash(message) {
@@ -609,9 +633,9 @@ async function api(action, { method = "GET", json = null, body = null, query = n
 
 const PRESETS = {
   ember: {
-    label: "Ember",
-    light: { bg: "#faf3ee", ink: "#2a1520", muted: "#8a6f78", line: "#f0dde6", accent: "#e85d6f", deep: "#c43d58", card: "#fff9f6", wash: "#ffd4c4" },
-    dark: { bg: "#1a0f22", ink: "#fff5f8", muted: "#cbb8c4", line: "#3d2848", accent: "#ff7a8f", deep: "#ffb8c8", card: "#2a1834", wash: "#3a1e42" },
+    label: "Blush",
+    light: { bg: "#FDE0E3", ink: "#4A1038", muted: "#9B0A6B", line: "#f7c8d2", accent: "#F55F73", deep: "#9B0A6B", card: "#fff6f7", wash: "#F97B6E" },
+    dark: { bg: "#4A1038", ink: "#FDE0E3", muted: "#f3b8c8", line: "#6d2454", accent: "#F2709C", deep: "#F97B6E", card: "#5c1848", wash: "#9B0A6B" },
   },
   harbor: {
     label: "Harbor",
@@ -693,7 +717,7 @@ function tokensFor(look) {
     const bg = look.bg || (look.mode === "dark" ? "#1c1614" : "#f6f1ec");
     const dark = luminance(bg) < 0.45;
     const ink = dark ? "#f7f3ee" : "#1c1410";
-    const accent = look.accent || "#e25b45";
+    const accent = look.accent || "#F55F73";
     return {
       "--bg": bg,
       "--ink": ink,
@@ -736,7 +760,7 @@ function applyLook() {
     props.forEach((key) => root.style.removeProperty(key));
     ["density", "nav", "home", "corners", "span", "notes"].forEach((key) => delete root.dataset[key]);
     document.body.className = "theme-dark";
-    if (theme) theme.content = "#241610";
+    if (theme) theme.content = "#4A1038";
     return;
   }
   const look = currentLook();
@@ -1095,37 +1119,43 @@ function navClass(route) {
 
 function landingScreen() {
   const features = [
-    ["A bubble per person", "Each pair gets a private space. Chats, notes, and calls never mix."],
-    ["Notes and photos", "Leave a note on the board or drop a moment they can open later."],
-    ["Chat", "A quiet thread that belongs only to the two of you."],
-    ["Watch together", "Paste a YouTube link and stay roughly in step."],
-    ["Two games", "Tic-tac-toe when you want a minute. Checkers when you want a match."],
-    ["Video calls", "See each other from the same bubble, in the browser."],
+    ["💬", "Chat", "A calm thread that belongs only to the two of you."],
+    ["🎬", "Watch together", "YouTube in sync, with video chat on the side."],
+    ["🎮", "Games & activities", "Board games, quizzes, daily questions, mood check-ins, and more."],
+    ["📸", "Moments & notes", "Photos with reactions, pinned love notes, and favorites."],
+    ["🫧", "Multiple bubbles", "A separate private space for each person — nothing mixes."],
+    ["🎨", "Your look", "Themes, layouts, animations, and per-bubble alerts."],
   ];
   return `<div class="landing">
     <header class="land-bar">
-      <div class="brand">${mark()}<span>BuzzBuds</span></div>
+      <div class="brand">${mark("full")}</div>
       <button class="btn ghost" type="button" data-act="go" data-route="auth" data-mode="login">Sign in</button>
     </header>
     <section class="hero">
       <div>
-        <p class="eyebrow">For two, across any distance</p>
-        <h1>A private bubble for the two of you.</h1>
-        <p class="lede">Chat, leave notes, share photos, watch something together, play a game, or hop on a video call. Start a separate bubble with each person. Nothing crosses between them.</p>
+        <p class="eyebrow">For two, any distance</p>
+        <h1>A private bubble for two, however far apart.</h1>
+        <p class="lede">Chat, watch together, play games, share moments and keep your love close.</p>
         <div class="hero-actions">
           <button class="btn rose" type="button" data-act="go" data-route="auth" data-mode="register">Create your bubble</button>
           <button class="btn ghost" type="button" data-act="go" data-route="auth" data-mode="login">I already have one</button>
         </div>
+        <ol class="onboard-steps">
+          <li><span class="step-n">1</span><span>Pick a username</span></li>
+          <li><span class="step-n">2</span><span>Invite your partner</span></li>
+          <li><span class="step-n">3</span><span>Open your bubble together</span></li>
+        </ol>
         ${S.bootError ? `<p class="error">${esc(S.bootError)}</p>` : ""}
       </div>
       <div class="phone" aria-hidden="true">
-        <div class="phone-top"><strong>You & yours</strong><span>today</span></div>
-        <div class="mini-note">Miss you. Left the lamp on.</div>
-        <div class="mini-row"><span class="on">X</span><span></span><span>O</span></div>
+        <div class="phone-top"><strong>You & yours</strong><span>♥ in sync</span></div>
+        ${mascotHtml("idle")}
+        <div class="mini-note">Miss you. Movie tonight? 🎬</div>
+        <div class="mini-row"><span class="on">💬</span><span>📸</span><span>🎮</span></div>
       </div>
     </section>
-    <section class="feature-grid">
-      ${features.map(([title, copy]) => `<article class="feature"><h3>${esc(title)}</h3><p>${esc(copy)}</p></article>`).join("")}
+    <section class="feature-grid landing-features">
+      ${features.map(([icon, title, copy]) => `<article class="feature glass-card"><span class="feature-icon" aria-hidden="true">${icon}</span><h3>${esc(title)}</h3><p>${esc(copy)}</p></article>`).join("")}
     </section>
   </div>`;
 }
@@ -1133,19 +1163,26 @@ function landingScreen() {
 function authScreen() {
   const register = S.authMode !== "login";
   return `<div class="auth-wrap">
-    <button class="text-btn" type="button" data-act="go" data-route="landing" style="color:#fff8f3">Back</button>
-    <div class="auth-card">
-      <div class="brand">${mark()}<span>BuzzBuds</span></div>
+    <button class="text-btn" type="button" data-act="go" data-route="landing">← Back</button>
+    <div class="auth-card glass-card">
+      <div class="brand brand-center">${mark("full")}</div>
+      <p class="tagline">A private bubble for two, however far apart.</p>
+      <p class="empty auth-lede">${register ? "Three quick steps to your shared bubble." : "Welcome back — pick up where you left off."}</p>
+      ${register ? `<ol class="onboard-steps compact">
+        <li><span class="step-n">1</span><span>Choose your name &amp; username</span></li>
+        <li><span class="step-n">2</span><span>Invite your partner by username</span></li>
+        <li><span class="step-n">3</span><span>Chat, watch, and play inside your bubble</span></li>
+      </ol>` : ""}
       <div class="tabs">
         <button class="tab ${register ? "on" : ""}" type="button" data-act="auth-tab" data-mode="register">Create</button>
         <button class="tab ${register ? "" : "on"}" type="button" data-act="auth-tab" data-mode="login">Sign in</button>
       </div>
       ${errorHtml()}
       <form id="auth-form" data-form="${register ? "register" : "login"}" class="stack">
-        ${register ? `<div class="field"><label for="name">Your name</label><input id="name" name="name" maxlength="40" required autocomplete="name"></div>` : ""}
+        ${register ? `<div class="field"><label for="name">Your name</label><input id="name" name="name" maxlength="40" required autocomplete="name" placeholder="What they call you"></div>` : ""}
         <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" required autocomplete="email"></div>
         <div class="field"><label for="password">Password</label><input id="password" name="password" type="password" minlength="6" required autocomplete="${register ? "new-password" : "current-password"}"></div>
-        <button class="btn rose" type="submit">${register ? "Get my username" : "Sign in"}</button>
+        <button class="btn rose" type="submit">${register ? "Create my bubble" : "Sign in"}</button>
       </form>
     </div>
   </div>`;
@@ -1157,17 +1194,18 @@ function momentSrc(id) {
 
 function bubbleListHtml() {
   const rows = S.bubbles || [];
-  if (!rows.length) return `<p class="empty">No bubbles yet — invite someone you miss.</p>`;
-  return rows.map((bubble) => {
+  if (!rows.length) return `<div class="empty empty-illo">${mascotHtml("wait")}<p>No bubbles yet. Invite someone you miss — your first hello is waiting.</p></div>`;
+  return rows.map((bubble, i) => {
     const partner = bubble.partner;
+    const grad = `bubble-tone-${(i % 3) + 1}`;
     if (bubble.status === "active") {
-      const snippet = bubble.snippet ? esc(bubble.snippet) : "Say the first hello";
+      const snippet = bubble.snippet ? esc(bubble.snippet) : "Tap to say hello 💬";
       const meta = esc(daysTogetherLabel(bubble));
       const visit = bubble.nextVisitAt ? ` · ${esc(visitCountdownLabel(bubble.nextVisitAt))}` : "";
       const current = bubble.id === S.bubble?.id ? " on" : "";
-      return `<button class="card bubble-row${current}" type="button" data-act="open-bubble" data-id="${bubble.id}">
-        ${ava(partner.displayName)}
-        <span class="grow"><strong>${esc(partner.displayName)}</strong><p class="bubble-meta">${meta}${visit}</p><p>@${esc(partner.username)} · ${snippet}</p></span>
+      return `<button class="bubble-card glass-card ${grad}${current}" type="button" data-act="open-bubble" data-id="${bubble.id}">
+        <span class="bubble-ava-pair">${ava(S.user?.displayName || "You")}${ava(partner.displayName)}</span>
+        <span class="grow"><strong>${esc(partner.displayName)}</strong><p class="bubble-meta">${meta}${visit}</p><p class="bubble-preview">@${esc(partner.username)} · ${snippet}</p></span>
       </button>`;
     }
     if (bubble.incoming) {
@@ -1189,22 +1227,22 @@ function bubbleListHtml() {
 function bubblesScreen() {
   const intro = S.bubble && S.bubble.status === "active"
     ? `<p class="empty">Your username is @${esc(S.user.username)}. Each person below has a separate chat, notes, photos, and calls.</p>`
-    : `<p class="eyebrow">Your username</p>
+    : `<p class="eyebrow">Step 1 — your username</p>
       <p class="username-xl">@${esc(S.user.username)}</p>
-      <div class="row"><button class="btn soft" type="button" data-act="copy-user">Copy</button></div>
+      <div class="row"><button class="btn soft" type="button" data-act="copy-user">Copy for your partner</button></div>
       <form data-form="username" class="username-form">
         <input name="username" value="${esc(S.user.username)}" maxlength="20" aria-label="Change username" autocapitalize="none">
         <button class="btn ghost" type="submit">Save</button>
       </form>
-      <p>Start a bubble with each person. Their chat stays separate from everyone else.</p>`;
+      <p class="empty">Step 2 — invite them below. Each bubble stays private and separate.</p>`;
   return `${errorHtml()}${flashHtml()}
     <p class="eyebrow">Your bubbles</p>
-    <h2>People</h2>
+    <h2>Who you're close with</h2>
     ${intro}
     <div id="bubble-list" class="stack">${bubbleListHtml()}</div>
     <form data-form="invite" class="stack gap-top">
-      <div class="field"><label for="partner">Their username</label><input id="partner" name="username" autocapitalize="none" autocomplete="off" placeholder="honeybud24" required></div>
-      <button class="btn rose" type="submit">${(S.bubbles || []).length ? "Start another bubble" : "Start a bubble"}</button>
+      <div class="field"><label for="partner">Their username</label><input id="partner" name="username" autocapitalize="none" autocomplete="off" placeholder="partner's @username" required></div>
+      <button class="btn rose" type="submit">${(S.bubbles || []).length ? "Invite someone else" : "Invite your partner"}</button>
     </form>`;
 }
 
@@ -1221,8 +1259,9 @@ function quickActions() {
 }
 
 function homeScreen() {
-  if (typeof BuzzActivities !== "undefined") return BuzzActivities.hubHome(S.badges);
-  return `${errorHtml()}${flashHtml()}<p class="empty">Loading hub…</p>`;
+  const hero = hubHeroHtml();
+  if (typeof BuzzActivities !== "undefined") return BuzzActivities.hubHome(S.badges, hero);
+  return `${errorHtml()}${flashHtml()}<p class="empty">Almost there…</p>`;
 }
 
 const ACTIVITY_KEYS = new Set(["daily", "mood", "timeline", "playlist", "draw", "wyr", "bucket", "quiz", "scrapbook", "jar"]);
@@ -1458,7 +1497,7 @@ function msgsHtml(list) {
     const mine = message.senderId === S.user.id;
     html += `<div class="msg ${mine ? "mine" : "theirs"}">${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}</time></div>`;
   });
-  return html || `<p class="empty">Your chat is waiting — say something lovely.</p>`;
+  return html || `<div class="empty empty-illo">${mascotHtml("wait")}<p>Your chat is waiting — say something lovely.</p></div>`;
 }
 
 function appendChatMessage(message) {
@@ -1481,7 +1520,7 @@ function chatScreen() {
 }
 
 function notesHtml() {
-  if (!S.notes.length) return `<p class="empty">Nothing pinned yet — leave the first little love note.</p>`;
+  if (!S.notes.length) return `<div class="empty empty-illo">${mascotHtml("wait")}<p>No notes yet. Write the first one 💌</p></div>`;
   return S.notes.map((note) => `<article class="note" style="background:${NOTE_COLORS[note.color] || NOTE_COLORS.blush}">
       <div class="who">${esc(whoName(note.authorId))} · ${esc(dayLabel(note.createdAt))}</div>
       <p>${escBr(note.content)}</p>
@@ -1547,7 +1586,7 @@ function momentCardHtml(moment) {
 }
 
 function momentsHtml() {
-  if (!S.moments.length) return `<p class="empty">No moments yet — share a photo they'll smile at later.</p>`;
+  if (!S.moments.length) return `<div class="empty empty-illo">${mascotHtml("wait")}<p>No moments yet. Share a photo they'll smile at later.</p></div>`;
   return S.moments.map((moment) => momentCardHtml(moment)).join("");
 }
 
@@ -1941,7 +1980,7 @@ function presetChoices() {
     return `<button class="choice ${look.preset === id ? "on" : ""}" type="button" data-act="look" data-key="preset" data-value="${id}"><span class="chip" style="background:linear-gradient(120deg, ${tone.bg} 0 42%, ${tone.accent} 42% 68%, ${tone.ink} 68%)"></span>${preset.label}</button>`;
   }).join("");
   const customBg = look.bg || "#f6f1ec";
-  const customAccent = look.accent || "#e25b45";
+  const customAccent = look.accent || "#F55F73";
   const custom = `<button class="choice ${look.preset === "custom" ? "on" : ""}" type="button" data-act="look" data-key="preset" data-value="custom"><span class="chip" style="background:linear-gradient(120deg, ${customBg} 0 55%, ${customAccent} 55%)"></span>Custom</button>`;
   return `<section class="look-block"><h3>Theme</h3><p class="empty">Pick a palette. Custom uses the colors below.</p><div class="choice-grid">${presets}${custom}</div></section>`;
 }
@@ -2010,7 +2049,7 @@ function screenFor(route) {
 function simpleFrame(content) {
   return `<div class="simple">
     <header class="simple-bar">
-      <button class="brand text-btn" type="button" data-act="go" data-route="bubbles">${mark()}<span>BuzzBuds</span></button>
+      <button class="brand text-btn" type="button" data-act="go" data-route="bubbles">${mark()}</button>
       <div class="row">
         <button class="text-btn" type="button" data-act="go" data-route="look">Look</button>
         <button class="text-btn" type="button" data-act="go" data-route="profile">Profile</button>
@@ -2049,7 +2088,7 @@ function appShell(content) {
   ];
   return `<div class="shell">
     <aside class="sidebar">
-      <button class="brand text-btn" type="button" data-act="go" data-route="home">${mark()}<span>BuzzBuds</span></button>
+      <button class="brand text-btn" type="button" data-act="go" data-route="home">${mark()}</button>
       ${peopleNav()}
       <nav class="side-nav">
         ${items.map(([route, label, ic]) => navButtonHtml(route, label, ic)).join("")}
@@ -2077,7 +2116,7 @@ function render() {
   destroyPlayer();
   applyLook();
   const titles = {
-    landing: "BuzzBuds",
+    landing: "BuzzBuds — a private bubble for two",
     auth: "Sign in · BuzzBuds",
     bubbles: "Bubbles · BuzzBuds",
     home: "Home · BuzzBuds",
@@ -3093,7 +3132,10 @@ async function onClick(event) {
       await api("signal", { method: "POST", json: { kind: "pulse" } });
       document.body.classList.add("self-pulse");
       window.setTimeout(() => document.body.classList.remove("self-pulse"), 1200);
-      if (typeof BuzzMotion !== "undefined") BuzzMotion.heartBurst(4);
+      if (typeof BuzzMotion !== "undefined") {
+        BuzzMotion.heartBurst(4);
+        BuzzMotion.mascotWave();
+      }
       showFlash("A gentle pulse is on its way.");
       return;
     }
@@ -3101,7 +3143,10 @@ async function onClick(event) {
       if (effectsOn()) {
         el.classList.add("react-burst");
         window.setTimeout(() => el.classList.remove("react-burst"), 520);
-        if (typeof BuzzMotion !== "undefined") BuzzMotion.reactBurst(el.dataset.emoji || "");
+        if (typeof BuzzMotion !== "undefined") {
+          BuzzMotion.reactBurst(el.dataset.emoji || "");
+          BuzzMotion.mascotHearts();
+        }
       }
       await momentReact(Number(el.dataset.id), el.dataset.emoji || "");
       S.momentsReactSig = momentReactSig(S.moments);
@@ -3327,7 +3372,10 @@ async function onSubmit(event) {
       const body = String(fd.get("body") || "").trim();
       if (!body) return;
       const sendBtn = form.querySelector('[type="submit"]');
-      if (typeof BuzzMotion !== "undefined") BuzzMotion.sendPulse(sendBtn);
+      if (typeof BuzzMotion !== "undefined") {
+        BuzzMotion.sendPulse(sendBtn);
+        BuzzMotion.mascotWink();
+      }
       const data = await api("message", { method: "POST", json: { body } });
       S.chat.push(data.message);
       form.reset();

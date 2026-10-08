@@ -83,6 +83,41 @@ const BuzzMotion = (() => {
     window.setTimeout(() => document.body.classList.remove("partner-online-glow"), 2400);
   }
 
+  function mascotLayer() {
+    let layer = document.getElementById("mascot-layer");
+    if (!layer) {
+      layer = document.createElement("div");
+      layer.id = "mascot-layer";
+      layer.className = "mascot-layer";
+      layer.setAttribute("aria-hidden", "true");
+      document.body.appendChild(layer);
+    }
+    return layer;
+  }
+
+  function playMascot(mood, ms = 1400) {
+    if (!active()) return;
+    const layer = mascotLayer();
+    layer.innerHTML = `<span class="mascot mascot-${mood} mascot-pop"><img src="assets/logo-mark.svg" alt=""></span>`;
+    layer.hidden = false;
+    window.setTimeout(() => {
+      layer.innerHTML = "";
+    }, ms);
+  }
+
+  function mascotWink() {
+    playMascot("wink", 1100);
+  }
+
+  function mascotHearts() {
+    playMascot("hearts", 1400);
+    heartBurst(8);
+  }
+
+  function mascotWave() {
+    playMascot("wave", 1400);
+  }
+
   function sendPulse(btn) {
     if (!btn) return;
     btn.classList.remove("send-pulse");
@@ -113,6 +148,9 @@ const BuzzMotion = (() => {
     partnerPulse,
     partnerOnlineGlow,
     sendPulse,
+    mascotWink,
+    mascotHearts,
+    mascotWave,
     reactBurst,
     skeletonBlock,
     scheduleTypingPing,

@@ -79,7 +79,7 @@ const BuzzActivities = (() => {
             <div class="react-bar">${react}</div>
           </article>`;
         }).join("")
-      : `<p class="empty">Add your first song — links or titles both work.</p>`;
+      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span><p>No songs yet. Add the one that reminds you of them.</p></div>`;
     const body = `<form data-form="activity-playlist" class="stack">
       <input name="title" placeholder="Song title" maxlength="120">
       <input name="url" placeholder="Spotify / YouTube link (optional)">
@@ -105,7 +105,7 @@ const BuzzActivities = (() => {
     const otd = feed?.onThisDay || [];
     const list = items.length
       ? items.map((it) => `<article class="timeline-item glass"><time>${esc(it.date)}</time><strong>${esc(it.title)}</strong><span class="pill">${esc(it.kind)}</span></article>`).join("")
-      : `<p class="empty">Your story starts here — add a milestone or share a moment.</p>`;
+      : `<div class="empty empty-illo"><span class="mascot mascot-wait" aria-hidden="true"><img src="assets/logo-mark.svg" alt=""></span><p>Your timeline is waiting for its first chapter.</p></div>`;
     const otdHtml = otd.length ? `<section class="gap-top"><h3>On this day</h3>${otd.map((it) => `<p>${esc(it.title)} · ${esc(it.date)}</p>`).join("")}</section>` : "";
     const body = `<form data-form="activity-milestone" class="stack">
       <input name="title" placeholder="Milestone (first date, move-in…)" maxlength="80" required>
@@ -170,31 +170,31 @@ const BuzzActivities = (() => {
     return activityShell("hub", "Favorites", "Hub", `<div class="stack">${list}</div>`);
   }
 
-  function hubHome(badges) {
+  function hubHome(badges, heroHtml) {
     const b = badges || {};
-    const card = (route, title, sub, badgeKey, tone) => {
+    const card = (route, icon, title, sub, badgeKey, tone, lobby) => {
       const n = b[badgeKey] || 0;
       const badge = n ? `<span class="hub-badge">${n > 9 ? "9+" : n}</span>` : "";
-      const lobby = route === "games" ? ` data-lobby="1"` : "";
-      return `<button class="hub-card ${tone}" type="button" data-act="go" data-route="${route}"${lobby}>${badge}<strong>${esc(title)}</strong><span>${esc(sub)}</span></button>`;
+      const lobbyAttr = lobby ? ` data-lobby="1"` : "";
+      return `<button class="hub-card ${tone}" type="button" data-act="go" data-route="${route}"${lobbyAttr}>
+        <span class="hub-card-icon" aria-hidden="true">${icon}</span>
+        ${badge}
+        <strong>${esc(title)}</strong>
+        <span>${esc(sub)}</span>
+      </button>`;
     };
     return `${typeof errorHtml === "function" ? errorHtml() : ""}${typeof flashHtml === "function" ? flashHtml() : ""}
-      ${typeof intimacyBarHtml === "function" ? intimacyBarHtml() : ""}
-      <div class="quick-bar glass">
-        <button class="btn rose" type="button" data-act="go" data-route="call">Video</button>
-        <button class="btn soft" type="button" data-act="go" data-route="chat">Chat</button>
-        <button class="btn soft" type="button" data-act="thinking">Thinking of you</button>
-        <button class="btn ghost" type="button" data-act="date-night">Date night</button>
-      </div>
-      <p class="eyebrow">Your space</p>
-      <h1>Together hub</h1>
-      <div class="hub-grid">
-        ${card("watch", "Watch", "Movies & shows", "hubWatch", "tone-watch")}
-        ${card("chat", "Chat", "Messages", "hubChat", "tone-chat")}
-        ${card("games", "Play", "Games & questions", "hubPlay", "tone-play")}
-        ${card("moments", "Share", "Photos & playlist", "hubShare", "tone-share")}
-        ${card("calendar", "Plan", "Calendar & lists", "hubPlan", "tone-plan")}
-        ${card("draw", "Create", "Draw & notes", "hubCreate", "tone-create")}
+      ${heroHtml || ""}
+      <p class="eyebrow hub-section-label">Your bubble</p>
+      <h1 class="hub-title">Everything you share, in one place</h1>
+      <div class="hub-grid hub-feature-grid">
+        ${card("watch", "🎬", "Watch together", "Synced video and show chat", "hubWatch", "tone-watch")}
+        ${card("chat", "💬", "Chat", "Private messages just for two", "chat", "tone-chat")}
+        ${card("games", "🎮", "Games", "Boards, quizzes, and quick play", "hubPlay", "tone-play", true)}
+        ${card("moments", "📸", "Moments", "Photos, reactions, and comments", "moments", "tone-share")}
+        ${card("notes", "💌", "Notes", "Pin sweet notes on the board", "notes", "tone-notes")}
+        ${card("calendar", "📅", "Plan", "Dates, lists, and favorites", "hubPlan", "tone-plan")}
+        ${card("draw", "✨", "Create", "Draw, jar, scrapbook, and more", "hubCreate", "tone-create")}
       </div>
       <div class="hub-strip gap-top">
         <button class="qbtn" type="button" data-act="go" data-route="daily" data-back-home="1">Daily question</button>
