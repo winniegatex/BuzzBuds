@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#4A1038">
   <meta name="description" content="BuzzBuds is a private bubble for two. Chat, watch together, play games, share moments and keep your love close, however far apart.">
   <meta property="og:title" content="BuzzBuds — a private bubble for two">
@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=24">
+  <link rel="stylesheet" href="assets/app.css?v=26">
 </head>
 <body class="theme-dark">
   <div id="ambience" class="ambience" aria-hidden="true">
@@ -49,8 +49,8 @@
     <div id="toast-actions"></div>
   </div>
   <noscript><p class="booting">BuzzBuds needs JavaScript turned on.</p></noscript>
-  <script src="assets/motion.js?v=24"></script>
-  <script src="assets/activities.js?v=24"></script>
-  <script src="assets/app.js?v=24"></script>
+  <script src="assets/motion.js?v=26"></script>
+  <script src="assets/activities.js?v=26"></script>
+  <script src="assets/app.js?v=26"></script>
 </body>
 </html>

@@ -14,12 +14,7 @@ const BuzzActivities = (() => {
 
   function activityShell(key, title, eyebrow, mainHtml) {
     const composer = typeof chatComposerHtml === "function"
-      ? `<form data-form="activity-chat" data-activity-key="${esc(key)}" class="composer chat-compose watch-composer">
-          <button type="button" class="btn soft emoji-btn" data-act="emoji-toggle" data-for="activity-${esc(key)}" aria-label="Add emoji">😊</button>
-          <input name="body" maxlength="400" placeholder="Chat while you play…" autocomplete="off">
-          <button class="btn rose" type="submit">Send</button>
-          ${typeof emojiBarHtml === "function" ? emojiBarHtml(`activity-${key}`) : ""}
-        </form>`
+      ? chatComposerHtml("activity-chat", { max: 400, placeholder: "Chat while you play…", extraClass: "watch-composer" }).replace("<form ", `<form data-activity-key="${esc(key)}" `)
       : "";
     return `${typeof errorHtml === "function" ? errorHtml() : ""}${typeof flashHtml === "function" ? flashHtml() : ""}
       <header class="activity-bar glass">

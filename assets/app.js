@@ -76,6 +76,8 @@ const S = {
   gamesLobby: [],
   gamesTurnSig: "",
   uiGameMenu: false,
+  watchChatOpen: true,
+  gameChatOpen: false,
   hashNav: false,
   resetStep: "",
   resetEmail: "",
@@ -141,11 +143,43 @@ function chatComposerHtml(formKey, { max, placeholder, disabled = false, extraCl
   const off = disabled ? "disabled" : "";
   const hide = disabled ? "hidden" : "";
   return `<form data-form="${formKey}" class="composer chat-compose ${extraClass}" ${hide}>
-    <button type="button" class="btn soft emoji-btn" data-act="emoji-toggle" data-for="${formKey}" aria-label="Add emoji" ${off}>😊</button>
-    <input name="body" maxlength="${max}" placeholder="${esc(placeholder)}" autocomplete="off" ${off}>
-    <button class="btn rose" type="submit" ${off}>Send</button>
+    <div class="composer-row">
+      <button type="button" class="btn soft emoji-btn" data-act="emoji-toggle" data-for="${formKey}" aria-label="Add emoji" ${off}>😊</button>
+      <textarea name="body" rows="1" maxlength="${max}" placeholder="${esc(placeholder)}" autocomplete="off" ${off}></textarea>
+      <button class="btn rose" type="submit" ${off}>Send</button>
+    </div>
     ${emojiBarHtml(formKey)}
   </form>`;
+}
+
+function scrollChatToEnd() {
+  const list = document.getElementById("msgs");
+  if (list) list.scrollTop = list.scrollHeight;
+  const watchList = document.getElementById("watch-msgs");
+  if (watchList) watchList.scrollTop = watchList.scrollHeight;
+  const gameList = document.getElementById("game-msgs");
+  if (gameList) gameList.scrollTop = gameList.scrollHeight;
+  const actList = document.getElementById("activity-msgs");
+  if (actList) actList.scrollTop = actList.scrollHeight;
+}
+
+function syncViewportHeight() {
+  const vv = window.visualViewport;
+  const height = vv ? Math.round(vv.height) : window.innerHeight;
+  const offset = vv ? Math.round(vv.offsetTop) : 0;
+  const root = document.documentElement;
+  root.style.setProperty("--app-h", `${height}px`);
+  root.style.setProperty("--vv-top", `${offset}px`);
+  const kb = vv ? (window.innerHeight - vv.height > 80) : false;
+  document.body.classList.toggle("kb-open", kb);
+  if (kb) scrollChatToEnd();
+}
+
+function growComposer(el) {
+  if (!(el instanceof HTMLTextAreaElement) || !el.closest(".composer")) return;
+  el.style.height = "auto";
+  const max = 16 * 4 * 1.4;
+  el.style.height = `${Math.min(el.scrollHeight, max)}px`;
 }
 
 function insertAtCursor(input, text) {
@@ -259,6 +293,7 @@ function gameBarHtml(title) {
     <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to games">←</button>
     <div class="activity-bar-title"><span class="eyebrow">Games</span><strong>${esc(title)}</strong></div>
     <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+    <button class="bar-btn game-chat-toggle" type="button" data-act="game-chat-toggle" aria-label="Game chat">💬</button>
     <button class="bar-btn" type="button" data-act="game-menu" aria-label="Game menu">⋯</button>
   </header>`;
 }
@@ -1758,10 +1793,12 @@ function appendChatMessage(message) {
 }
 
 function chatScreen() {
-  return `${errorHtml()}${screenBar(partnerName(), "Chat")}
+  return `<div class="pane-chat">
+    ${errorHtml()}${screenBar(partnerName(), "Chat")}
     ${partnerStatusHtml()}
     <div id="msgs" class="msgs">${msgsHtml(S.chat)}</div>
-    ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}`;
+    ${chatComposerHtml("chat", { max: 1000, placeholder: `Write to ${partnerName()}` })}
+  </div>`;
 }
 
 function notesHtml() {
@@ -2117,8 +2154,10 @@ function gamesScreen() {
       </div>`;
   }
   const title = gameTypeLabel(S.game.type);
-  return `${errorHtml()}${gameBarHtml(title)}${gameLeaveOverlayHtml()}
-    <div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>`;
+  return `<div class="pane-game ${S.gameChatOpen ? "chat-open" : ""}">
+    ${errorHtml()}${gameBarHtml(title)}${gameLeaveOverlayHtml()}
+    <div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>
+  </div>`;
 }
 
 function watchCommentsHtml() {
@@ -2137,8 +2176,11 @@ function watchCommentsHtml() {
 
 function watchScreen() {
   const vid = S.watch?.videoId;
-  return `${errorHtml()}${flashHtml()}${screenBar("Press play for two", "Watch together")}
+  const chatOpen = S.watchChatOpen !== false;
+  return `<div class="pane-watch ${chatOpen ? "chat-open" : "chat-collapsed"}">
+    ${errorHtml()}${flashHtml()}${screenBar("Press play for two", "Watch together")}
     <p class="empty">Paste a YouTube link you both want to watch. Playback stays roughly in step. Comments on the right stay tied to this video.</p>
+    <button class="btn ghost watch-chat-toggle" type="button" data-act="watch-chat-toggle">${chatOpen ? "Hide chat" : "Show chat"}</button>
     <div class="watch-layout">
       <div class="watch-main">
         <form data-form="watch" class="stack">
@@ -2153,7 +2195,8 @@ function watchScreen() {
         <div id="watch-msgs" class="watch-msgs">${watchCommentsHtml()}</div>
         ${chatComposerHtml("watch-chat", { max: 280, placeholder: "Say something…", disabled: !vid, extraClass: "watch-composer" })}
       </aside>
-    </div>`;
+    </div>
+  </div>`;
 }
 
 function callActionsHtml() {
@@ -2340,7 +2383,7 @@ function appShell(content) {
       </nav>
       <div class="you-chip ${S.presence?.partnerOnline ? "partner-here" : ""}">${ava(partnerName())}<div><strong>${esc(partnerName())}</strong><small>@${esc(S.bubble.partner.username)}</small></div></div>
     </aside>
-    <main class="main"><div id="screen">${content}</div></main>
+    <main class="main"><div id="screen" class="${S.route === "chat" ? "is-chat" : S.route === "watch" ? "is-watch" : S.route === "games" && S.gameType ? "is-game" : ""}">${content}</div></main>
     <nav class="tabbar">
       ${tabs.map(([route, label, ic]) => tabButtonHtml(route, label, ic)).join("")}
     </nav>
@@ -2424,11 +2467,14 @@ function afterRender() {
   if (S.route === "moments") markSectionSeen("moments");
   if (S.route === "watch") markSectionSeen("watch");
   paintBadges();
-  const chatInput = document.querySelector('form[data-form="chat"] input[name="body"]');
+  const chatInput = document.querySelector('form[data-form="chat"] [name="body"]');
   if (chatInput && !chatInput.dataset.typingBound) {
     chatInput.dataset.typingBound = "1";
     chatInput.addEventListener("input", pingTyping);
   }
+  document.querySelectorAll(".composer textarea").forEach(growComposer);
+  syncViewportHeight();
+  scrollChatToEnd();
   pullPresence().catch(() => {});
   if (ACTIVITY_KEYS.has(S.route) || S.route === "calendar" || S.route === "favorites") {
     paintActivityComments();
@@ -3218,6 +3264,16 @@ async function onClick(event) {
       if (layout) layout.classList.toggle("chat-open");
       return;
     }
+    if (act === "watch-chat-toggle") {
+      S.watchChatOpen = S.watchChatOpen === false;
+      render();
+      return;
+    }
+    if (act === "game-chat-toggle") {
+      S.gameChatOpen = !S.gameChatOpen;
+      render();
+      return;
+    }
     if (act === "auth-tab") {
       S.authMode = el.dataset.mode;
       S.error = "";
@@ -3279,12 +3335,14 @@ async function onClick(event) {
       const willOpen = bar.hidden;
       closeEmojiBars();
       bar.hidden = !willOpen;
+      scrollChatToEnd();
       return;
     }
     if (act === "emoji-pick") {
       const form = document.querySelector(`[data-form="${el.dataset.for}"]`);
-      const input = form?.querySelector('input[name="body"]');
+      const input = form?.querySelector('[name="body"]');
       insertAtCursor(input, el.dataset.emoji || "");
+      growComposer(input);
       return;
     }
     if (act === "look") {
@@ -3777,6 +3835,7 @@ async function onSubmit(event) {
       S.chat.push(data.message);
       form.reset();
       closeEmojiBars();
+      growComposer(form.querySelector("textarea"));
       const list = document.getElementById("msgs");
       if (list) {
         appendChatMessage(data.message);
@@ -3807,7 +3866,9 @@ async function onSubmit(event) {
       S.activityComments[key] = list;
       form.reset();
       closeEmojiBars();
+      growComposer(form.querySelector("textarea"));
       paintActivityComments();
+      scrollChatToEnd();
       return;
     }
     if (kind === "activity-daily") {
@@ -3966,7 +4027,9 @@ async function onSubmit(event) {
       S.gameCommentsSig = S.gameComments.map((c) => c.id).join(",");
       form.reset();
       closeEmojiBars();
+      growComposer(form.querySelector("textarea"));
       paintGameComments();
+      scrollChatToEnd();
       return;
     }
     if (kind === "kahoot-add") {
@@ -3993,7 +4056,9 @@ async function onSubmit(event) {
       S.watchCommentsSig = S.watchComments.map((c) => c.id).join(",");
       form.reset();
       closeEmojiBars();
+      growComposer(form.querySelector("textarea"));
       paintWatchComments();
+      scrollChatToEnd();
       markSectionSeen("watch");
       return;
     }
@@ -4064,6 +4129,23 @@ document.addEventListener("change", (event) => {
   saveLook(patch);
 });
 document.addEventListener("submit", onSubmit);
+document.addEventListener("input", (event) => {
+  if (event.target.matches?.(".composer textarea")) growComposer(event.target);
+});
+document.addEventListener("focusin", (event) => {
+  const field = event.target.closest("input, textarea");
+  if (!field) return;
+  window.setTimeout(() => {
+    field.scrollIntoView({ block: "center", inline: "nearest" });
+    scrollChatToEnd();
+  }, 80);
+});
+syncViewportHeight();
+window.addEventListener("resize", syncViewportHeight);
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", syncViewportHeight);
+  window.visualViewport.addEventListener("scroll", syncViewportHeight);
+}
 window.addEventListener("hashchange", () => {
   const parsed = parseRouteHash(location.hash);
   const current = routeHash(S.route, S.gameType);
