@@ -16,7 +16,7 @@ jobs:
           fetch-depth: 2 # Required so the action knows which files changed
 
       - name: 📂 Sync files via FTP
-        uses: SamKirkland/FTP-Deploy-Action@v5.0.0
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
