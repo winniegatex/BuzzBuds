@@ -55,6 +55,10 @@ match ($action) {
     'timeline_feed' => handle_timeline_feed(),
     'search' => handle_search(),
     'jar_voice' => handle_jar_voice(),
+    'live' => handle_live(),
+    'live_poll' => handle_live_poll(),
+    'health' => handle_health(),
+    'push_sub' => handle_push_sub(),
     default => json_out(['ok' => false, 'error' => 'Unknown action.'], 404),
 };
 
@@ -140,6 +144,13 @@ function bubble_seen_response(string $section): void
         'watch' => bubble_watch_mark_read($db, $uid, $bid),
         default => throw new UserError('Unknown section.'),
     };
+    if ($section === 'chat') {
+        $read = bubble_read_row($db, $uid, $bid);
+        live_push($db, $bid, 'chat_seen', [
+            'userId' => $uid,
+            'lastMessageId' => (int) ($read['last_message_id'] ?? 0),
+        ]);
+    }
     json_ok(['badges' => bubble_badges($db, $uid, $bid)]);
 }
 
@@ -421,12 +432,18 @@ function handle_messages(): void
     $since = (int) ($_GET['since'] ?? 0);
     $db = db();
     if ($since > 0) {
-        $stmt = $db->prepare('SELECT * FROM messages WHERE bubble_id = ? AND id > ? ORDER BY id ASC LIMIT 100');
+        $stmt = $db->prepare('SELECT * FROM messages WHERE bubble_id = ? AND id > ? ORDER BY id ASC LIMIT 50');
         $stmt->execute([(int) $bubble['id'], $since]);
         $rows = $stmt->fetchAll();
     } else {
-        $stmt = $db->prepare('SELECT * FROM (SELECT * FROM messages WHERE bubble_id = ? ORDER BY id DESC LIMIT 80) ORDER BY id ASC');
-        $stmt->execute([(int) $bubble['id']]);
+        $before = (int) ($_GET['before'] ?? 0);
+        if ($before > 0) {
+            $stmt = $db->prepare('SELECT * FROM (SELECT * FROM messages WHERE bubble_id = ? AND id < ? ORDER BY id DESC LIMIT 50) ORDER BY id ASC');
+            $stmt->execute([(int) $bubble['id'], $before]);
+        } else {
+            $stmt = $db->prepare('SELECT * FROM (SELECT * FROM messages WHERE bubble_id = ? ORDER BY id DESC LIMIT 50) ORDER BY id ASC');
+            $stmt->execute([(int) $bubble['id']]);
+        }
         $rows = $stmt->fetchAll();
     }
     json_ok(['messages' => array_map('message_public', $rows)]);
@@ -438,19 +455,28 @@ function handle_message(): void
     $user = require_user();
     $bubble = require_active_bubble($user);
     $data = read_json();
+    $tRecv = (int) round(microtime(true) * 1000);
+    $t0 = (int) ($data['t0'] ?? 0);
+    $clientId = preg_replace('/[^a-zA-Z0-9_-]/', '', (string) ($data['clientId'] ?? ''));
     $body = clean_block((string) ($data['body'] ?? ''), 1000, 'Write a message first.');
     $now = gmdate('c');
     $db = db();
-    $db->prepare('INSERT INTO messages (bubble_id, sender_id, body, created_at) VALUES (?,?,?,?)')
-        ->execute([(int) $bubble['id'], (int) $user['id'], $body, $now]);
+    $db->prepare('INSERT INTO messages (bubble_id, sender_id, body, created_at, client_id) VALUES (?,?,?,?,?)')
+        ->execute([(int) $bubble['id'], (int) $user['id'], $body, $now, $clientId !== '' ? $clientId : null]);
+    $tSaved = (int) round(microtime(true) * 1000);
     $db->prepare('UPDATE bubbles SET updated_at = ? WHERE id = ?')->execute([$now, (int) $bubble['id']]);
     $id = (int) $db->lastInsertId();
-    json_ok(['message' => [
+    $message = [
         'id' => $id,
         'senderId' => (int) $user['id'],
         'body' => $body,
         'createdAt' => $now,
-    ]]);
+        'clientId' => $clientId,
+        'status' => 'delivered',
+    ];
+    live_push($db, (int) $bubble['id'], 'message', ['message' => $message, 't0' => $t0 ?: $tRecv, 'tRecv' => $tRecv, 'tSaved' => $tSaved]);
+    latency_log("message recv_ms=" . ($t0 ? max(0, $tRecv - $t0) : 0) . " save_ms=" . max(0, $tSaved - $tRecv) . " id=" . $id);
+    json_ok(['message' => $message, 'timing' => ['recv' => $tRecv, 'saved' => $tSaved]]);
 }
 
 function handle_notes(): void
@@ -840,6 +866,7 @@ function handle_game_move(): void
         }
         throw $e;
     }
+    live_push($db, (int) $bubble['id'], 'game', ['type' => $type, 'version' => $version]);
     json_ok(['game' => present_game($type, $state, $version, (int) $user['id'])]);
 }
 
@@ -919,14 +946,16 @@ function handle_watch_comment(): void
     $db->prepare('INSERT INTO watch_comments (bubble_id, video_id, sender_id, body, created_at) VALUES (?,?,?,?,?)')
         ->execute([(int) $bubble['id'], $videoId, (int) $user['id'], $body, $now]);
     $id = (int) $db->lastInsertId();
-    json_ok(['comment' => watch_comment_public([
+    $comment = watch_comment_public([
         'id' => $id,
         'bubble_id' => (int) $bubble['id'],
         'video_id' => $videoId,
         'sender_id' => (int) $user['id'],
         'body' => $body,
         'created_at' => $now,
-    ])]);
+    ]);
+    live_push($db, (int) $bubble['id'], 'watch_comment', ['comment' => $comment]);
+    json_ok(['comment' => $comment]);
 }
 
 function watch_comment_public(array $row): array
@@ -973,14 +1002,16 @@ function handle_game_comment(): void
     $db->prepare('INSERT INTO game_comments (bubble_id, game_type, sender_id, body, created_at) VALUES (?,?,?,?,?)')
         ->execute([(int) $bubble['id'], $type, (int) $user['id'], $body, $now]);
     $id = (int) $db->lastInsertId();
-    json_ok(['comment' => game_comment_public([
+    $comment = game_comment_public([
         'id' => $id,
         'bubble_id' => (int) $bubble['id'],
         'game_type' => $type,
         'sender_id' => (int) $user['id'],
         'body' => $body,
         'created_at' => $now,
-    ])]);
+    ]);
+    live_push($db, (int) $bubble['id'], 'game_comment', ['comment' => $comment]);
+    json_ok(['comment' => $comment]);
 }
 
 function game_comment_public(array $row): array
@@ -1118,12 +1149,14 @@ function handle_activity_comment(): void
     $now = gmdate('c');
     $db->prepare('INSERT INTO activity_comments (bubble_id, activity_key, sender_id, body, created_at) VALUES (?,?,?,?,?)')
         ->execute([(int) $bubble['id'], $key, (int) $user['id'], $body, $now]);
-    json_ok(['comment' => activity_comment_public([
+    $comment = activity_comment_public([
         'id' => (int) $db->lastInsertId(),
         'sender_id' => (int) $user['id'],
         'body' => $body,
         'created_at' => $now,
-    ])]);
+    ]);
+    live_push($db, (int) $bubble['id'], 'activity_comment', ['key' => $key, 'comment' => $comment]);
+    json_ok(['comment' => $comment]);
 }
 
 function handle_activity_seen(): void
@@ -1288,6 +1321,7 @@ function handle_presence(): void
             $typingUntil = microtime(true) + 5.0;
         }
         presence_touch($db, $bid, $uid, $typingUntil);
+        live_push($db, $bid, 'presence', ['userId' => $uid, 'typing' => !empty($data['typing'])]);
         json_ok();
     }
     presence_touch($db, $bid, $uid);
@@ -1338,7 +1372,9 @@ function handle_signal(): void
         if ($kind === 'pulse') {
             $db->prepare('INSERT INTO signals (bubble_id, from_user_id, kind, payload, created_at) VALUES (?,?,?,?,?)')
                 ->execute([$bid, $uid, 'pulse', '{}', gmdate('c')]);
-            json_ok(['id' => (int) $db->lastInsertId()]);
+            $newId = (int) $db->lastInsertId();
+            live_push($db, $bid, 'signal', ['id' => $newId, 'kind' => 'pulse', 'from' => $uid]);
+            json_ok(['id' => $newId]);
         }
         $payload = $data['payload'] ?? [];
         if (!is_array($payload)) {
@@ -1352,6 +1388,7 @@ function handle_signal(): void
             ->execute([$bid, $uid, $kind, $raw, gmdate('c')]);
         $newId = (int) $db->lastInsertId();
         $db->prepare('DELETE FROM signals WHERE bubble_id = ? AND id < ?')->execute([$bid, max(0, $newId - 300)]);
+        live_push($db, $bid, 'signal', ['id' => $newId, 'kind' => $kind, 'from' => $uid, 'payload' => $payload]);
         json_ok(['id' => $newId]);
     }
     $maxStmt = $db->prepare('SELECT COALESCE(MAX(s.id), 0) AS max_id FROM signals s JOIN bubbles b ON b.id = s.bubble_id WHERE b.status = \'active\' AND (b.user_a_id = ? OR b.user_b_id = ?)');
@@ -1555,6 +1592,8 @@ function message_public(array $row): array
         'senderId' => (int) $row['sender_id'],
         'body' => $row['body'],
         'createdAt' => $row['created_at'],
+        'clientId' => (string) ($row['client_id'] ?? ''),
+        'status' => 'delivered',
     ];
 }
 
@@ -1667,4 +1706,97 @@ function orient_image($img, string $tmp, int $type)
         return $rotated;
     }
     return $img;
+}
+
+function handle_live(): void
+{
+    $user = require_user();
+    $bubble = require_active_bubble($user);
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    @ini_set('zlib.output_compression', '0');
+    @ini_set('output_buffering', 'off');
+    header('Content-Type: text/event-stream; charset=utf-8');
+    header('Cache-Control: no-cache, no-store');
+    header('Connection: keep-alive');
+    header('X-Accel-Buffering: no');
+    while (ob_get_level() > 0) {
+        ob_end_flush();
+    }
+    $after = (int) ($_GET['after'] ?? 0);
+    $start = time();
+    $lastPing = 0;
+    $db = db();
+    $bid = (int) $bubble['id'];
+    echo "event: hello\ndata: {\"ok\":true}\n\n";
+    flush();
+    while (!connection_aborted() && (time() - $start) < 25) {
+        $events = live_events_since($db, $bid, $after, 60);
+        foreach ($events as $ev) {
+            $after = (int) $ev['id'];
+            echo 'id: ' . $ev['id'] . "\n";
+            echo "event: live\n";
+            echo 'data: ' . json_encode($ev, JSON_UNESCAPED_UNICODE) . "\n\n";
+        }
+        if (time() - $lastPing >= 5) {
+            echo 'event: ping\ndata: {"t":' . (int) round(microtime(true) * 1000) . "}\n\n";
+            $lastPing = time();
+        }
+        flush();
+        usleep(250000);
+    }
+    echo "event: bye\ndata: {}\n\n";
+    flush();
+    exit;
+}
+
+function handle_live_poll(): void
+{
+    $user = require_user();
+    $bubble = require_active_bubble($user);
+    $after = (int) ($_GET['after'] ?? 0);
+    json_ok(['events' => live_events_since(db(), (int) $bubble['id'], $after, 80)]);
+}
+
+function handle_health(): void
+{
+    $user = current_user();
+    $tail = '';
+    $path = dirname(__DIR__) . '/storage/latency.log';
+    if (is_file($path)) {
+        $lines = @file($path, FILE_IGNORE_NEW_LINES) ?: [];
+        $tail = implode("\n", array_slice($lines, -12));
+    }
+    json_ok([
+        'ok' => true,
+        'user' => $user ? true : false,
+        'live' => 'sse+poll',
+        'latencyTail' => $tail,
+        'serverNow' => (int) round(microtime(true) * 1000),
+    ]);
+}
+
+function handle_push_sub(): void
+{
+    require_mutation();
+    $user = require_user();
+    $bubble = require_active_bubble($user);
+    $data = read_json();
+    $endpoint = trim((string) ($data['endpoint'] ?? ''));
+    if ($endpoint === '' || !preg_match('#^https://#', $endpoint)) {
+        throw new UserError('Need a push endpoint.');
+    }
+    $db = db();
+    $db->prepare('INSERT INTO push_subs (endpoint, user_id, bubble_id, p256dh, auth, updated_at) VALUES (?,?,?,?,?,?)
+        ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, bubble_id = excluded.bubble_id, p256dh = excluded.p256dh, auth = excluded.auth, updated_at = excluded.updated_at')
+        ->execute([
+            $endpoint,
+            (int) $user['id'],
+            (int) $bubble['id'],
+            (string) ($data['p256dh'] ?? ''),
+            (string) ($data['auth'] ?? ''),
+            gmdate('c'),
+        ]);
+    json_ok(['ok' => true]);
 }

@@ -21,6 +21,7 @@ const BuzzActivities = (() => {
         <button class="bar-btn" type="button" data-act="nav-back" aria-label="${esc(activityBackAria())}">←</button>
         <div class="activity-bar-title"><span class="eyebrow">${esc(eyebrow)}</span><strong>${esc(title)}</strong></div>
         <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+        <button class="bar-btn" type="button" data-act="howto" data-kind="${esc(key)}" aria-label="How to play">?</button>
         <button class="bar-btn" type="button" data-act="activity-chat-toggle" aria-label="Activity chat">💬</button>
       </header>
       <div class="activity-layout">

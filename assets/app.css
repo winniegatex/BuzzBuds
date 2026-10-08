@@ -1450,7 +1450,7 @@ body.is-navigating #screen::before {
 .jar-note.sealed { opacity: 0.85; }
 .activity-bar {
   display: grid;
-  grid-template-columns: auto 1fr auto auto auto;
+  grid-template-columns: auto 1fr auto auto auto auto;
   gap: 8px;
   align-items: center;
   padding: 10px 12px;
@@ -1775,3 +1775,71 @@ body.fx-off .mascot-wait, body.fx-off .boot-logo .boot-mark, body.fx-off .auth-l
   body.brand-shell.theme-dark { animation: none; }
   #view-root { view-transition-name: none; }
 }
+
+.live-banner {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 90;
+  background: var(--ink);
+  color: var(--bg);
+  font-size: 13px;
+  font-weight: 650;
+  padding: 8px 14px;
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+}
+.msg-state { font-size: 11px; opacity: 0.8; margin-left: 6px; }
+.msg-state.retry { text-decoration: underline; cursor: pointer; }
+.msg.failed { opacity: 0.85; }
+.howto-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 85;
+  background: color-mix(in srgb, #000 45%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+.howto-card {
+  width: min(440px, 100%);
+  max-height: min(88dvh, 640px);
+  overflow: auto;
+  padding: 18px;
+  border-radius: var(--radius);
+}
+.howto-card ol { margin: 8px 0 12px; padding-left: 20px; }
+.howto-card li { margin: 4px 0; font-size: 15px; }
+.howto-meta { font-size: 13px; color: var(--muted); }
+.howto-skip { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.howto-demo.ttt.mini {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+  width: 132px;
+  margin: 8px auto;
+}
+.howto-demo.ttt.mini .cell {
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--card);
+}
+.howto-demo.mini-c4 {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+  margin: 8px 0;
+}
+.howto-demo.mini-c4 .c4-slot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--line);
+  display: grid;
+  place-items: center;
+}
+.howto-demo.mini-c4 .piece { width: 78%; aspect-ratio: 1; border-radius: 50%; }

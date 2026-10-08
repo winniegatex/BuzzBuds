@@ -83,6 +83,8 @@ const S = {
   hubActivity: null,
   todayDaily: null,
   todayMood: null,
+  howtoOpen: "",
+  partnerReadId: 0,
   hashNav: false,
   resetStep: "",
   resetEmail: "",
@@ -298,6 +300,7 @@ function gameBarHtml(title) {
     <button class="bar-btn" type="button" data-act="nav-back" aria-label="Back to games">←</button>
     <div class="activity-bar-title"><span class="eyebrow">Games</span><strong>${esc(title)}</strong></div>
     <button class="bar-btn" type="button" data-act="go" data-route="home" aria-label="Home">⌂</button>
+    <button class="bar-btn" type="button" data-act="howto" data-kind="${esc(S.gameType || "")}" aria-label="How to play">?</button>
     <button class="bar-btn game-chat-toggle" type="button" data-act="game-chat-toggle" aria-label="Game chat">💬</button>
     <button class="bar-btn" type="button" data-act="game-menu" aria-label="Game menu">⋯</button>
   </header>`;
@@ -328,6 +331,190 @@ function lobbyStatusPill(type) {
 
 function gameLobbyCard(type, title, desc) {
   return `<button class="game-card" type="button" data-act="play" data-type="${type}"><h3>${esc(title)} ${lobbyStatusPill(type)}</h3><p>${esc(desc)}</p></button>`;
+}
+
+const HOWTO = {
+  tictactoe: {
+    title: "Tic-tac-toe",
+    blurb: "Get three of your marks in a line before they do.",
+    players: "2",
+    time: "2–5 min",
+    first: "Whoever opened the bubble goes first as X.",
+    steps: ["Tap an empty square to place your mark.", "Then wait — your partner plays the next one.", "Three in a row (across, down, or diagonal) wins.", "If the board fills with no line, it's a sweet little draw."],
+    special: "You'll hear a ring when it's your turn. Chat stays open on the side. Pause anytime and pick it back up later.",
+    demo: "mini-ttt",
+  },
+  checkers: {
+    title: "Checkers",
+    blurb: "Hop, jump, and crown your way across the board.",
+    players: "2",
+    time: "10–20 min",
+    first: "Coral moves first.",
+    steps: ["Slide a piece diagonally forward onto a dark square.", "If you can jump an opponent, you must.", "Reach the far row to become a king (gold ring) — kings move both ways.", "Capture all their pieces, or leave them with no moves, to win."],
+    special: "Forced jumps keep things honest. Chat, pause, and turn rings work here too.",
+    demo: "mini-checkers",
+  },
+  connect4: {
+    title: "Connect Four",
+    blurb: "Line up four in a row before your partner does.",
+    players: "2",
+    time: "5–10 min",
+    first: "The bubble opener drops first.",
+    steps: ["Tap a column to drop your disc.", "Discs stack from the bottom.", "Four in a row — any direction — wins.", "A full board with no four is a draw."],
+    special: "Turn alerts ping you. Side chat is for gloating, kindly.",
+    demo: "mini-c4",
+  },
+  memory: {
+    title: "Memory match",
+    blurb: "Flip cards, find pairs, and steal the most matches.",
+    players: "2",
+    time: "5–10 min",
+    first: "The bubble opener flips first.",
+    steps: ["Flip two cards on your turn.", "A match stays yours and you flip again.", "No match? They flip next.", "Most pairs at the end wins. A tie is a draw."],
+    special: "Your turn rings if you're off looking at something else.",
+    demo: "",
+  },
+  hangman: {
+    title: "Hangman",
+    blurb: "One of you hides a word. The other guesses, letter by letter.",
+    players: "2",
+    time: "5–8 min",
+    first: "The setter picks the word first; then the guesser starts.",
+    steps: ["One of you types a secret word.", "The other taps letters to guess.", "Too many misses and the setter wins.", "Guess the word in time and the guesser wins."],
+    special: "Take turns being the sneaky setter. Pause and resume whenever.",
+    demo: "",
+  },
+  solitaire: {
+    title: "Solitaire",
+    blurb: "Your own Klondike board, racing them to clear the deck.",
+    players: "2 (side by side)",
+    time: "8–15 min",
+    first: "You both play at once on your own tableau.",
+    steps: ["Flip stock, build columns descending by color, aces up to foundations.", "Empty columns want kings.", "Clear your deck to win your board.", "You're racing, not blocking each other."],
+    special: "Peek at their progress in the status line. Chat if you need a hint.",
+    demo: "",
+  },
+  kahoot: {
+    title: "Kahoot",
+    blurb: "Build a quiz together, then answer in sync for points.",
+    players: "2",
+    time: "10–15 min",
+    first: "The host adds questions, then starts the round.",
+    steps: ["Add multiple-choice questions while you build.", "When you both have at least one, start.", "Tap an answer each round — faster + correct scores more.", "Highest score at the end wins."],
+    special: "Points favor speed and accuracy. You can pause between rounds.",
+    demo: "",
+  },
+  wyr: {
+    title: "Would you rather",
+    blurb: "Quick this-or-that rounds to see if you match.",
+    players: "2",
+    time: "2–5 min",
+    first: "Both answer the same prompt — no waiting for turns.",
+    steps: ["Read the two options.", "Tap the one you'd pick.", "See if you landed on the same side.", "A new prompt appears when you're both in."],
+    special: "No winners, just sparks. Chat about the weird ones.",
+    demo: "",
+  },
+  daily: {
+    title: "Daily question",
+    blurb: "One question a day — answers unlock together.",
+    players: "2",
+    time: "2 min",
+    first: "Whoever opens it can answer first.",
+    steps: ["Read today's question.", "Write from the heart and send.", "When they answer too, you both see.", "Come back tomorrow for a fresh one."],
+    special: "A badge waits on Home when a new question is up.",
+    demo: "",
+  },
+  quiz: {
+    title: "Couple quiz",
+    blurb: "Write questions about you. They guess — then swap.",
+    players: "2",
+    time: "10 min",
+    first: "You each add questions, then start guessing.",
+    steps: ["Write a question about yourself with four choices.", "Mark the true answer.", "When you both have one, start.", "Guess their answers for points."],
+    special: "It's playful, not a test. Chat between questions.",
+    demo: "",
+  },
+  draw: {
+    title: "Drawing board",
+    blurb: "Doodle on the same canvas, live.",
+    players: "2",
+    time: "as long as you like",
+    first: "Anyone can draw at any time.",
+    steps: ["Pick a color.", "Draw with your finger or mouse.", "Their strokes appear as they draw.", "Clear the board if you both want a fresh page."],
+    special: "Strokes sync over the live channel. No turns, just together.",
+    demo: "",
+  },
+  playlist: {
+    title: "Shared playlist",
+    blurb: "Songs that remind you of each other, with live reactions.",
+    players: "2",
+    time: "whenever",
+    first: "Add a track whenever the mood hits.",
+    steps: ["Drop a title and optional link.", "Tap listen to open it.", "React with a little emoji burst.", "Build the soundtrack of the two of you."],
+    special: "Reactions show up for both of you right away.",
+    demo: "",
+  },
+  bucket: {
+    title: "Bucket list",
+    blurb: "Dreams, dates, and someday-plans you check off together.",
+    players: "2",
+    time: "whenever",
+    first: "Add the first wish — either of you.",
+    steps: ["Write something you want to do together.", "Check it off when it happens.", "Keep adding; nothing is too small.", "Look back when you need a spark."],
+    special: "A notification can nudge you when they add a wish.",
+    demo: "",
+  },
+  jar: {
+    title: "Love notes jar",
+    blurb: "Seal a note for now — or for later.",
+    players: "2",
+    time: "2 min",
+    first: "Drop a note whenever you miss them.",
+    steps: ["Write something sweet.", "Optionally pick an unlock time.", "Seal it in the jar.", "Open it when the time comes — or leave it as a surprise."],
+    special: "Locked notes stay hidden until they're ready. Voice notes welcome.",
+    demo: "",
+  },
+};
+
+function howtoSkipKey(kind) {
+  return `buzz-howto-${kind}`;
+}
+
+function howtoShouldShow(kind) {
+  return !!HOWTO[kind] && localStorage.getItem(howtoSkipKey(kind)) !== "1";
+}
+
+function howtoDemoHtml(kind) {
+  if (kind === "mini-ttt") {
+    return `<div class="howto-demo ttt mini" aria-hidden="true">${[0,1,2,3,4,5,6,7,8].map((i) => `<span class="cell ${[0,4,8].includes(i) ? "x" : ""}">${[0,4,8].includes(i) ? "✕" : ""}</span>`).join("")}</div><p class="empty">A winning line — that's the whole game in one glance.</p>`;
+  }
+  if (kind === "mini-c4") {
+    return `<div class="howto-demo mini-c4" aria-hidden="true">${[0,1,2,3].map(() => `<span class="c4-slot"><span class="piece" style="background:var(--rose)"></span></span>`).join("")}</div><p class="empty">Four in a row, dropped from above.</p>`;
+  }
+  if (kind === "mini-checkers") {
+    return `<p class="empty">Dark squares only. Jump when you can. Kings glow gold.</p>`;
+  }
+  return "";
+}
+
+function howtoOverlayHtml(kind) {
+  const g = HOWTO[kind];
+  if (!g) return "";
+  return `<div class="howto-overlay" role="dialog" aria-modal="true" data-howto="${esc(kind)}">
+    <div class="howto-card glass">
+      <h3>${esc(g.title)}</h3>
+      <p>${esc(g.blurb)}</p>
+      <p class="howto-meta">${esc(g.players)} players · ${esc(g.time)}</p>
+      <p><strong>Who goes first.</strong> ${esc(g.first)}</p>
+      <ol>${g.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+      <p><strong>Together on BuzzBuds.</strong> ${esc(g.special)}</p>
+      ${howtoDemoHtml(g.demo)}
+      <div class="stack">
+        <button class="btn rose" type="button" data-act="howto-dismiss" data-kind="${esc(kind)}">Got it, let's play</button>
+        <label class="howto-skip"><input type="checkbox" data-howto-skip="${esc(kind)}"> Don't show again</label>
+      </div>
+    </div>
+  </div>`;
 }
 
 async function leaveGameLobby() {
@@ -1265,6 +1452,9 @@ async function go(route, opts = {}) {
   const hash = routeHash(S.route, S.gameType);
   if (!S.hashNav && location.hash !== "#" + hash) location.hash = hash;
   S.renderedRoute = S.route;
+  const guideKey = S.gameType || S.route;
+  if (howtoShouldShow(guideKey) && !S.howtoOpen) S.howtoOpen = guideKey;
+  startLiveChannel();
   render();
   } finally {
     S.navLock = false;
@@ -1726,11 +1916,12 @@ async function ensureActivityRoute(route) {
 function activityScreen(route) {
   const key = route === "calendar" || route === "favorites" ? "hub" : route;
   if (typeof BuzzActivities === "undefined") return `${errorHtml()}<p class="empty">Loading…</p>`;
-  if (route === "timeline") return BuzzActivities.screens.timeline(S.timelineFeed || { items: [], onThisDay: [] });
-  if (route === "calendar") return BuzzActivities.screens.calendar(S.activity || {});
-  if (route === "favorites") return BuzzActivities.screens.favorites(S.activity || {});
+  const extra = S.howtoOpen ? howtoOverlayHtml(S.howtoOpen) : "";
+  if (route === "timeline") return BuzzActivities.screens.timeline(S.timelineFeed || { items: [], onThisDay: [] }) + extra;
+  if (route === "calendar") return BuzzActivities.screens.calendar(S.activity || {}) + extra;
+  if (route === "favorites") return BuzzActivities.screens.favorites(S.activity || {}) + extra;
   const fn = BuzzActivities.screens[route];
-  return fn ? fn(S.activity || {}) : `${errorHtml()}<p class="empty">Coming soon.</p>`;
+  return (fn ? fn(S.activity || {}) : `${errorHtml()}<p class="empty">Coming soon.</p>`) + extra;
 }
 
 function paintActivityComments() {
@@ -1893,7 +2084,7 @@ function msgsHtml(list) {
       lastDay = day;
     }
     const mine = message.senderId === S.user.id;
-    html += `<div class="msg ${mine ? "mine" : "theirs"}">${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}</time></div>`;
+    html += `<div class="msg ${mine ? "mine" : "theirs"}" data-msg-id="${esc(String(message.id || ""))}" data-client="${esc(message.clientId || "")}">${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}${msgStatusHtml(message)}</time></div>`;
   });
   return html || `<div class="empty empty-illo">${mascotHtml("wait")}<p>Your chat is waiting — say something lovely.</p></div>`;
 }
@@ -1906,8 +2097,137 @@ function appendChatMessage(message) {
   const mine = message.senderId === S.user.id;
   const div = document.createElement("div");
   div.className = `msg ${mine ? "mine" : "theirs"}${effectsOn() ? " msg-pop" : ""}`;
-  div.innerHTML = `${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}</time>`;
+  if (message.status === "failed") div.classList.add("failed");
+  div.dataset.msgId = String(message.id || "");
+  div.dataset.client = message.clientId || "";
+  div.innerHTML = `${formatChatBody(message.body)}<time>${esc(clock(message.createdAt))}${msgStatusHtml(message)}</time>`;
+  if (message.status === "failed") div.dataset.act = "retry-msg";
   list.appendChild(div);
+}
+
+function msgStatusHtml(message) {
+  if (!S.user || message.senderId !== S.user.id) return "";
+  if (message.status === "sending") return ` <span class="msg-state">Sending</span>`;
+  if (message.status === "failed") return ` <span class="msg-state retry">Failed, tap to retry</span>`;
+  if (message.status === "read") return ` <span class="msg-state ticks">✓✓</span>`;
+  return ` <span class="msg-state ticks">✓</span>`;
+}
+
+function paintMsgStatus(message) {
+    const sel = message.clientId
+    ? `.msg[data-client="${message.clientId}"]`
+    : `.msg[data-msg-id="${message.id}"]`;
+  const el = document.querySelector(sel);
+  if (!el) return;
+  el.dataset.msgId = String(message.id || "");
+  const time = el.querySelector("time");
+  if (time) time.innerHTML = `${esc(clock(message.createdAt))}${msgStatusHtml(message)}`;
+  el.classList.toggle("failed", message.status === "failed");
+  if (message.status === "failed") el.dataset.act = "retry-msg";
+  else delete el.dataset.act;
+}
+
+function ingestChatMessage(message, meta = {}) {
+  if (!message) return;
+  const dup = S.chat.find((row) =>
+    (message.id && row.id === message.id) || (message.clientId && row.clientId && row.clientId === message.clientId)
+  );
+  if (dup) {
+    Object.assign(dup, message);
+    if (dup.status !== "failed") dup.status = message.status || "delivered";
+    if ((S.partnerReadId || 0) >= dup.id) dup.status = "read";
+    paintMsgStatus(dup);
+    return;
+  }
+  if ((S.partnerReadId || 0) >= message.id) message.status = "read";
+  else if (!message.status) message.status = "delivered";
+  S.chat.push(message);
+  appendChatMessage(message);
+  if (meta.t0 && message.senderId !== S.user?.id) {
+    const ms = Date.now() - Number(meta.t0);
+    console.debug("[buzz-live] partner received in", ms, "ms");
+  }
+  if (document.hidden && message.senderId !== S.user?.id) {
+    buzzNotify("New message", String(message.body || "").slice(0, 80));
+  }
+}
+
+function applyLiveEvent(ev) {
+  const p = ev.payload || {};
+  if (ev.kind === "message") ingestChatMessage(p.message, p);
+  if (ev.kind === "chat_seen" && p.userId !== S.user?.id) {
+    S.partnerReadId = p.lastMessageId || 0;
+    S.chat.forEach((m) => {
+      if (m.senderId === S.user?.id && m.id && m.id <= S.partnerReadId) {
+        m.status = "read";
+        paintMsgStatus(m);
+      }
+    });
+  }
+  if (ev.kind === "presence" && p.userId !== S.user?.id) {
+    S.presence = { ...S.presence, partnerTyping: !!p.typing, partnerOnline: true };
+    paintPartnerStatus();
+  }
+  if (ev.kind === "watch_comment" && p.comment) {
+    if (S.watchComments.some((c) => c.id === p.comment.id)) return;
+    S.watchComments.push(p.comment);
+    const list = document.getElementById("watch-msgs");
+    if (list) list.innerHTML = watchCommentsHtml();
+  }
+  if (ev.kind === "game_comment" && p.comment) {
+    if (S.gameComments.some((c) => c.id === p.comment.id)) return;
+    S.gameComments.push(p.comment);
+    paintGameComments();
+  }
+  if (ev.kind === "game" && p.type) {
+    if (S.gameType === p.type) pullGame().catch(() => {});
+    else pullGamesTurnPing().catch(() => {});
+  }
+  if (ev.kind === "signal" && p.kind && p.from !== S.user?.id) {
+    enqueueSignal({ id: p.id, kind: p.kind, payload: p.payload || {}, from: p.from, bubbleId: S.bubble?.id });
+  }
+  if (ev.kind === "activity_comment" && p.comment && p.key === S.activityKey) {
+    const list = S.activityComments[p.key] || [];
+    if (!list.some((c) => c.id === p.comment.id)) {
+      list.push(p.comment);
+      S.activityComments[p.key] = list;
+      paintActivityComments();
+    }
+  }
+}
+
+function buzzNotify(title, body) {
+  try {
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      navigator.serviceWorker?.controller?.postMessage({ type: "notify", title, body });
+      if (!navigator.serviceWorker?.controller) new Notification(title, { body });
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function startLiveChannel() {
+  if (typeof BuzzLive === "undefined" || !S.user || !S.bubble || S.bubble.status !== "active") {
+    if (typeof BuzzLive !== "undefined") BuzzLive.stop();
+    return;
+  }
+  if (S.liveBubbleId === S.bubble.id && BuzzLive.status().mode !== "off") return;
+  S.liveBubbleId = S.bubble.id;
+  BuzzLive.start(applyLiveEvent);
+  if (typeof Notification !== "undefined" && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+  }
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("assets/sw.js").catch(() => {});
+  }
+}
+
+async function sendChatBody(body, clientId) {
+  const t0 = Date.now();
+  const data = await api("message", { method: "POST", json: { body, clientId, t0 } });
+  ingestChatMessage({ ...data.message, status: "delivered", clientId });
+  console.debug("[buzz-live] send ack", data.timing || {}, "rtt", Date.now() - t0, "ms");
 }
 
 function chatScreen() {
@@ -2267,21 +2587,21 @@ function gamesScreen() {
     const actLink = (route, title, desc) => `<button class="game-card" type="button" data-act="go" data-route="${route}" data-back-games="1"><h3>${esc(title)}</h3><p>${esc(desc)}</p></button>`;
     return `${errorHtml()}${screenBar("Pick a board", "Games")}
       <div class="game-list">
-        ${gameLobbyCard("tictactoe", "Tic-tac-toe", "Three in a row. The person who opened the bubble goes first.")}
-        ${gameLobbyCard("checkers", "Checkers", "Coral moves first. If you can jump, you have to. Kings wear a gold ring.")}
-        ${gameLobbyCard("solitaire", "Solitaire", "Your own Klondike board in the bubble. Race to clear the deck.")}
-        ${gameLobbyCard("kahoot", "Kahoot", "Build a quiz together, then answer in sync for points.")}
-        ${actLink("daily", "Daily question", "One question a day — answers unlock together.")}
-        ${actLink("wyr", "Would you rather", "Quick rounds to see if you match.")}
-        ${actLink("mood", "Mood check-in", "Share how you feel today.")}
-        ${gameLobbyCard("connect4", "Connect Four", "Drop discs — four in a row wins.")}
-        ${gameLobbyCard("memory", "Memory match", "Find the pairs together.")}
-        ${gameLobbyCard("hangman", "Hangman", "One sets the word, one guesses.")}
+        ${gameLobbyCard("tictactoe", "Tic-tac-toe", HOWTO.tictactoe.blurb)}
+        ${gameLobbyCard("checkers", "Checkers", HOWTO.checkers.blurb)}
+        ${gameLobbyCard("solitaire", "Solitaire", HOWTO.solitaire.blurb)}
+        ${gameLobbyCard("kahoot", "Kahoot", HOWTO.kahoot.blurb)}
+        ${actLink("daily", "Daily question", HOWTO.daily.blurb)}
+        ${actLink("wyr", "Would you rather", HOWTO.wyr.blurb)}
+        ${actLink("mood", "Mood check-in", "Share how you feel today, in one tap.")}
+        ${gameLobbyCard("connect4", "Connect Four", HOWTO.connect4.blurb)}
+        ${gameLobbyCard("memory", "Memory match", HOWTO.memory.blurb)}
+        ${gameLobbyCard("hangman", "Hangman", HOWTO.hangman.blurb)}
       </div>`;
   }
   const title = gameTypeLabel(S.game.type);
   return `<div class="pane-game ${S.gameChatOpen ? "chat-open" : ""}">
-    ${errorHtml()}${gameBarHtml(title)}${gameLeaveOverlayHtml()}
+    ${errorHtml()}${gameBarHtml(title)}${gameLeaveOverlayHtml()}${S.howtoOpen ? howtoOverlayHtml(S.howtoOpen) : ""}
     <div class="game-layout"><div id="game-root" class="game-main">${gameInner()}</div>${gameChatAside()}</div>
   </div>`;
 }
@@ -2629,22 +2949,23 @@ async function tick() {
   try {
     const before = bubblesSig();
     const hadBubble = !!(S.bubble && S.bubble.status === "active");
+    const liveOn = typeof BuzzLive !== "undefined" && BuzzLive.status().mode === "sse";
     await refreshState();
     if (hadBubble && (!S.bubble || S.bubble.status !== "active") && !["bubbles", "profile"].includes(S.route)) {
       await go("bubbles", { force: true });
       return;
     }
     if (S.bubble && S.bubble.status === "active") {
-      if (S.route === "chat") await pullChat();
+      if (S.route === "chat" && !liveOn) await pullChat();
       if (S.route === "notes") await pullNotes();
       if (S.route === "moments") await pullMoments();
       if (S.gameType) {
-        await pullGame();
-        if (S.route === "games") await pullGameComments();
-      } else {
+        if (!liveOn) await pullGame();
+        if (S.route === "games" && !liveOn) await pullGameComments();
+      } else if (!liveOn) {
         await pullGamesTurnPing();
       }
-      if (S.route === "watch") {
+      if (S.route === "watch" && !liveOn) {
         await pullWatch();
         await pullWatchComments();
       }
@@ -2652,7 +2973,7 @@ async function tick() {
         await pullActivityState();
       }
     }
-    await pullSignals();
+    if (!liveOn) await pullSignals();
     await pullPresence();
     if (bubblesSig() !== before) {
       const list = document.getElementById("bubble-list");
@@ -2668,20 +2989,19 @@ async function tick() {
 }
 
 async function pullChat() {
-  const since = S.chat.length ? S.chat[S.chat.length - 1].id : 0;
+  const ids = S.chat.map((m) => Number(m.id) || 0).filter((id) => id > 0);
+  const since = ids.length ? Math.max(...ids) : 0;
   const data = await api("messages", { query: { since } });
   if (!data.messages.length) return;
-  if (since === 0) S.chat = data.messages;
-  else S.chat.push(...data.messages);
   const list = document.getElementById("msgs");
-  if (!list) return;
-  const stick = list.scrollHeight - list.scrollTop - list.clientHeight < 120;
+  const stick = list ? list.scrollHeight - list.scrollTop - list.clientHeight < 120 : true;
   if (since === 0) {
-    list.innerHTML = msgsHtml(S.chat);
+    S.chat = data.messages.map((m) => ({ ...m, status: m.status || "delivered" }));
+    if (list) list.innerHTML = msgsHtml(S.chat);
   } else {
-    data.messages.forEach((message) => appendChatMessage(message));
+    data.messages.forEach((message) => ingestChatMessage(message));
   }
-  if (stick) list.scrollTop = list.scrollHeight;
+  if (list && stick) list.scrollTop = list.scrollHeight;
 }
 
 async function pullNotes() {
@@ -3678,6 +3998,33 @@ async function onClick(event) {
       await loadMomentComments(id);
       return;
     }
+    if (act === "howto") {
+      S.howtoOpen = el.dataset.kind || S.gameType || S.route;
+      render();
+      return;
+    }
+    if (act === "howto-dismiss") {
+      const box = document.querySelector("[data-howto-skip]");
+      const kind = el.dataset.kind || S.howtoOpen;
+      if (box?.checked && kind) localStorage.setItem(howtoSkipKey(kind), "1");
+      S.howtoOpen = "";
+      render();
+      return;
+    }
+    if (act === "retry-msg") {
+      const clientId = el.dataset.client;
+      const pending = S.chat.find((m) => m.clientId === clientId && m.status === "failed");
+      if (!pending) return;
+      pending.status = "sending";
+      paintMsgStatus(pending);
+      try {
+        await sendChatBody(pending.body, pending.clientId);
+      } catch {
+        pending.status = "failed";
+        paintMsgStatus(pending);
+      }
+      return;
+    }
     if (act === "play") {
       const type = el.dataset.type;
       S.gameComments = [];
@@ -3687,6 +4034,10 @@ async function onClick(event) {
       S.solSel = null;
       await go("games", { gameType: type, force: true, backTo: { route: "games", lobby: true }, skipBack: true });
       pullGameComments().catch(() => {});
+      if (howtoShouldShow(type)) {
+        S.howtoOpen = type;
+        render();
+      }
       return;
     }
     if (act === "game-lobby") {
@@ -3987,15 +4338,26 @@ async function onSubmit(event) {
         BuzzMotion.sendPulse(sendBtn);
         BuzzMotion.mascotWink();
       }
-      const data = await api("message", { method: "POST", json: { body } });
-      S.chat.push(data.message);
+      const clientId = "c" + Date.now() + Math.random().toString(16).slice(2, 8);
+      const pending = {
+        id: 0,
+        senderId: S.user.id,
+        body,
+        createdAt: new Date().toISOString(),
+        clientId,
+        status: "sending",
+      };
+      S.chat.push(pending);
       form.reset();
       closeEmojiBars();
       growComposer(form.querySelector("textarea"));
-      const list = document.getElementById("msgs");
-      if (list) {
-        appendChatMessage(data.message);
-        list.scrollTop = list.scrollHeight;
+      appendChatMessage(pending);
+      scrollChatToEnd();
+      try {
+        await sendChatBody(body, clientId);
+      } catch {
+        pending.status = "failed";
+        paintMsgStatus(pending);
       }
       markSectionSeen("chat");
       return;

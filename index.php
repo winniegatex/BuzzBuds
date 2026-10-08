@@ -20,7 +20,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="assets/app.css?v=27">
+  <link rel="stylesheet" href="assets/app.css?v=28">
 </head>
 <body class="theme-dark">
   <div id="ambience" class="ambience" aria-hidden="true">
@@ -49,8 +49,9 @@
     <div id="toast-actions"></div>
   </div>
   <noscript><p class="booting">BuzzBuds needs JavaScript turned on.</p></noscript>
-  <script src="assets/motion.js?v=27"></script>
-  <script src="assets/activities.js?v=27"></script>
-  <script src="assets/app.js?v=27"></script>
+  <script src="assets/motion.js?v=28"></script>
+  <script src="assets/activities.js?v=28"></script>
+  <script src="assets/live.js?v=28"></script>
+  <script src="assets/app.js?v=28"></script>
 </body>
 </html>

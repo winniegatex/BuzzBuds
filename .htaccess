@@ -1,5 +1,9 @@
 Options -Indexes
 
+<IfModule mod_deflate.c>
+  SetEnvIfNoCase Query_String "action=live" no-gzip dont-vary
+</IfModule>
+
 <FilesMatch "\.(sqlite|log)$">
   Require all denied
 </FilesMatch>

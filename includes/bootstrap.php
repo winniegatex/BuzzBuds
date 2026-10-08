@@ -271,6 +271,7 @@ CREATE TABLE IF NOT EXISTS signals (
   created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_msg ON messages(bubble_id, id);
+CREATE INDEX IF NOT EXISTS idx_msg_created ON messages(bubble_id, created_at, id);
 CREATE INDEX IF NOT EXISTS idx_notes ON notes(bubble_id, id);
 CREATE INDEX IF NOT EXISTS idx_moments ON moments(bubble_id, id);
 CREATE INDEX IF NOT EXISTS idx_sig ON signals(bubble_id, id);
@@ -316,6 +317,13 @@ SQL);
     if ($userCols !== [] && !in_array('session_epoch', $userCols, true)) {
         $pdo->exec('ALTER TABLE users ADD COLUMN session_epoch INTEGER NOT NULL DEFAULT 1');
     }
+    $msgCols = [];
+    foreach ($pdo->query('PRAGMA table_info(messages)')->fetchAll() as $col) {
+        $msgCols[] = $col['name'];
+    }
+    if ($msgCols !== [] && !in_array('client_id', $msgCols, true)) {
+        $pdo->exec('ALTER TABLE messages ADD COLUMN client_id TEXT');
+    }
     $pdo->exec(<<<'SQL'
 CREATE TABLE IF NOT EXISTS password_resets (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -337,6 +345,23 @@ CREATE TABLE IF NOT EXISTS auth_rate_limits (
 );
 SQL);
     $pdo->exec(<<<'SQL'
+CREATE TABLE IF NOT EXISTS live_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  bubble_id INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  created_ms INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_live_events ON live_events(bubble_id, id);
+CREATE TABLE IF NOT EXISTS push_subs (
+  endpoint TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL,
+  bubble_id INTEGER NOT NULL,
+  p256dh TEXT,
+  auth TEXT,
+  updated_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS bubble_presence (
   bubble_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
@@ -689,6 +714,46 @@ function presence_partner(PDO $db, int $bubbleId, int $partnerId): array
         'online' => ($now - $last) < 28.0,
         'typing' => $typing > $now,
     ];
+}
+
+function latency_log(string $line): void
+{
+    $dir = dirname(__DIR__) . '/storage';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    @file_put_contents($dir . '/latency.log', gmdate('c') . ' ' . $line . "\n", FILE_APPEND);
+}
+
+function live_push(PDO $db, int $bubbleId, string $kind, array $payload): int
+{
+    $ms = (int) round(microtime(true) * 1000);
+    $db->prepare('INSERT INTO live_events (bubble_id, kind, payload, created_at, created_ms) VALUES (?,?,?,?,?)')
+        ->execute([$bubbleId, $kind, json_encode($payload, JSON_UNESCAPED_UNICODE), gmdate('c'), $ms]);
+    $id = (int) $db->lastInsertId();
+    $db->prepare('DELETE FROM live_events WHERE bubble_id = ? AND id < ?')->execute([$bubbleId, max(0, $id - 500)]);
+    $t0 = isset($payload['t0']) ? (int) $payload['t0'] : 0;
+    if ($t0 > 0) {
+        latency_log($kind . ' saved_broadcast_ms=' . max(0, $ms - $t0) . ' bubble=' . $bubbleId);
+    }
+    return $id;
+}
+
+function live_events_since(PDO $db, int $bubbleId, int $after, int $limit = 80): array
+{
+    $limit = max(1, min(100, $limit));
+    $stmt = $db->prepare("SELECT * FROM live_events WHERE bubble_id = ? AND id > ? ORDER BY id ASC LIMIT {$limit}");
+    $stmt->execute([$bubbleId, $after]);
+    $out = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $out[] = [
+            'id' => (int) $row['id'],
+            'kind' => $row['kind'],
+            'payload' => json_decode((string) $row['payload'], true) ?: [],
+            'createdMs' => (int) $row['created_ms'],
+        ];
+    }
+    return $out;
 }
 
 function require_active_bubble(array $user): array
